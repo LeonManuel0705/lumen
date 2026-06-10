@@ -3,6 +3,20 @@ use x86_64::instructions::port::Port;
 const DATA: u16 = 0x60;
 const STATUS_CMD: u16 = 0x64;
 
+pub fn read_status() -> u8 {
+    unsafe {
+        let mut status: Port<u8> = Port::new(STATUS_CMD);
+        status.read()
+    }
+}
+
+pub fn read_data() -> u8 {
+    unsafe {
+        let mut data: Port<u8> = Port::new(DATA);
+        data.read()
+    }
+}
+
 pub fn init() {
     unsafe {
         let mut cmd: Port<u8> = Port::new(STATUS_CMD);
@@ -36,7 +50,7 @@ pub fn init() {
         cmd.write(0xA8);
 
         write_to_mouse(0xFF);
-        for _ in 0..3 { let _ = read_data_with_timeout(); }
+        for _ in 0..2 { let _ = read_aux_with_timeout(); }
 
         write_to_mouse(0xF6);
         write_to_mouse(0xF3);
@@ -50,6 +64,7 @@ unsafe fn wait_write() {
     for _ in 0..100_000 {
         if status.read() & 0x02 == 0 { return; }
     }
+    crate::serial_println!("[ps2] timeout waiting for controller write-ready");
 }
 
 unsafe fn wait_read() {
@@ -57,14 +72,21 @@ unsafe fn wait_read() {
     for _ in 0..100_000 {
         if status.read() & 0x01 != 0 { return; }
     }
+    crate::serial_println!("[ps2] timeout waiting for controller data");
 }
 
-unsafe fn read_data_with_timeout() -> Option<u8> {
+// Reads only bytes coming from the mouse (AUX status bit set), discarding any
+// keyboard scancodes queued during boot so they can't desync the handshake.
+unsafe fn read_aux_with_timeout() -> Option<u8> {
     let mut status: Port<u8> = Port::new(STATUS_CMD);
     let mut data: Port<u8> = Port::new(DATA);
     for _ in 0..100_000 {
-        if status.read() & 0x01 != 0 {
-            return Some(data.read());
+        let st = status.read();
+        if st & 0x01 != 0 {
+            let byte = data.read();
+            if st & 0x20 != 0 {
+                return Some(byte);
+            }
         }
     }
     None
@@ -77,5 +99,5 @@ unsafe fn write_to_mouse(byte: u8) {
     cmd.write(0xD4);
     wait_write();
     data.write(byte);
-    let _ = read_data_with_timeout();
+    let _ = read_aux_with_timeout();
 }

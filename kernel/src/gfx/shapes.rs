@@ -94,7 +94,7 @@ fn ring_coverage(px: i32, py: i32, cx: i32, cy: i32, inner: i64, outer: i64, inn
             if d_sq >= inner_s && d_sq < outer_s { hit += 1; }
         }
     }
-    ((hit * 255) / 16) as u8
+    ((hit * 255) / (SAMPLES * SAMPLES) as u32) as u8
 }
 
 pub fn fill_ellipse(fb: &mut Framebuffer, cx: i32, cy: i32, rx: i32, ry: i32, c: Color) {
@@ -179,6 +179,7 @@ fn circle_coverage(px: i32, py: i32, cx: i32, cy: i32, r: i32) -> u8 {
     ((hit * 255) / total) as u8
 }
 
+#[allow(dead_code)]
 pub fn draw_line(fb: &mut Framebuffer, x0: i32, y0: i32, x1: i32, y1: i32, c: Color) {
     let dx = (x1 - x0).abs();
     let dy = -(y1 - y0).abs();

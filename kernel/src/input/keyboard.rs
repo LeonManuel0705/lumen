@@ -1,6 +1,5 @@
 use pc_keyboard::{layouts, DecodedKey, HandleControl, KeyCode, Keyboard, ScancodeSet1};
 use spin::{Lazy, Mutex};
-use x86_64::instructions::port::Port;
 
 #[derive(Default, Copy, Clone)]
 pub struct Keys {
@@ -20,11 +19,13 @@ static STATE: Lazy<Mutex<State>> = Lazy::new(|| {
     })
 });
 
-pub fn handle_irq() {
-    let scancode = unsafe {
-        let mut p: Port<u8> = Port::new(0x60);
-        p.read()
-    };
+// Force the Lazy before interrupts are enabled, so its one-time init can never
+// race an IRQ landing mid-initialization.
+pub fn init() {
+    Lazy::force(&STATE);
+}
+
+pub fn process_byte(scancode: u8) {
     let mut s = STATE.lock();
     if let Ok(Some(event)) = s.kbd.add_byte(scancode) {
         if let Some(key) = s.kbd.process_keyevent(event) {
@@ -39,8 +40,10 @@ pub fn handle_irq() {
 }
 
 pub fn take_keys() -> Keys {
-    let mut s = STATE.lock();
-    let k = s.pending;
-    s.pending = Keys::default();
-    k
+    x86_64::instructions::interrupts::without_interrupts(|| {
+        let mut s = STATE.lock();
+        let k = s.pending;
+        s.pending = Keys::default();
+        k
+    })
 }

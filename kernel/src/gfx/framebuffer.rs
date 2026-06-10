@@ -11,6 +11,7 @@ pub struct Framebuffer<'a> {
 }
 
 impl<'a> Framebuffer<'a> {
+    #[allow(dead_code)]
     pub fn from_boot(fb: &'a mut BootFb) -> Self {
         let info = fb.info();
         let buf = fb.buffer_mut();
@@ -18,11 +19,15 @@ impl<'a> Framebuffer<'a> {
     }
 
     pub fn from_raw(buf: &'a mut [u8], info: FrameBufferInfo) -> Self {
+        let stride_bytes = info.stride * info.bytes_per_pixel;
+        // The buffer may be shorter than the mode (display.rs clamps to MAX_BYTES);
+        // never expose rows the slice can't back.
+        let max_rows = if stride_bytes == 0 { 0 } else { buf.len() / stride_bytes };
         Self {
             buf,
             width: info.width,
-            height: info.height,
-            stride_bytes: info.stride * info.bytes_per_pixel,
+            height: info.height.min(max_rows),
+            stride_bytes,
             bpp: info.bytes_per_pixel,
             format: info.pixel_format,
         }
@@ -50,6 +55,7 @@ impl<'a> Framebuffer<'a> {
         encode(&mut self.buf[off..off + self.bpp], self.format, mixed);
     }
 
+    #[allow(dead_code)]
     pub fn clear(&mut self, c: Color) {
         for y in 0..self.height {
             for x in 0..self.width {
