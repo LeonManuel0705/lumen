@@ -54,7 +54,7 @@ impl Scene {
             vx: 220.0,
             vy: 0.0,
             squash: Spring::new(0.0, 220.0, 14.0),
-            trail: [(mid_x, 0.0); TRAIL_LEN],
+            trail: [(mid_x, BALL_RADIUS + 10.0); TRAIL_LEN],
             trail_idx: 0,
             pulse: Spring::new(1.0, 120.0, 12.0),
             sun_x: w - w * 0.18,
@@ -79,9 +79,11 @@ impl Scene {
         self.cursor_y.step(dt);
 
         if input.buttons_just_pressed & 0x01 != 0 {
-            self.spawn_ripple(self.cursor_target_x, self.cursor_target_y);
-            let dx = self.cursor_target_x - self.ball_x;
-            let dy = self.cursor_target_y - self.ball_y;
+            let click_x = self.cursor_x.current;
+            let click_y = self.cursor_y.current;
+            self.spawn_ripple(click_x, click_y);
+            let dx = click_x - self.ball_x;
+            let dy = click_y - self.ball_y;
             let len_sq = dx * dx + dy * dy;
             if len_sq < (BALL_RADIUS * 1.4) * (BALL_RADIUS * 1.4) {
                 let scale = if len_sq > 4.0 { 1.0 / BALL_RADIUS } else { 0.0 };
@@ -94,7 +96,7 @@ impl Scene {
 
         if input.key_pressed_space {
             self.vy = -780.0;
-            self.vx += if (self.elapsed * 13.0) as i32 % 2 == 0 { 80.0 } else { -80.0 };
+            self.vx += crate::rng::sign() * 80.0;
             self.squash.nudge(-10.0);
             self.pulse.nudge(-2.0);
         }
@@ -104,6 +106,7 @@ impl Scene {
             self.ball_y = BALL_RADIUS + 10.0;
             self.vx = 220.0;
             self.vy = 0.0;
+            self.trail = [(self.ball_x, self.ball_y); TRAIL_LEN];
         }
 
         self.vy += GRAVITY * dt;
@@ -121,14 +124,14 @@ impl Scene {
         if self.ball_x + BALL_RADIUS > self.width {
             self.ball_x = self.width - BALL_RADIUS;
             self.vx = -self.vx.abs() * 0.88;
-            self.squash.nudge(-8.0);
+            self.squash.nudge(8.0);
             self.pulse.nudge(-2.0);
         }
         if self.ball_y + BALL_RADIUS > floor_y {
             self.ball_y = floor_y - BALL_RADIUS;
             if self.vy.abs() < 60.0 {
                 self.vy = -560.0;
-                self.vx += if self.elapsed as i32 % 2 == 0 { 80.0 } else { -80.0 };
+                self.vx += crate::rng::sign() * 80.0;
             } else {
                 self.vy = -self.vy.abs() * 0.84;
             }
@@ -138,7 +141,7 @@ impl Scene {
         if self.ball_y - BALL_RADIUS < 0.0 {
             self.ball_y = BALL_RADIUS;
             self.vy = self.vy.abs() * 0.7;
-            self.squash.nudge(6.0);
+            self.squash.nudge(-6.0);
         }
 
         self.squash.set_target(0.0);

@@ -7,7 +7,9 @@ mod arch;
 mod display;
 mod gfx;
 mod input;
+mod rng;
 mod scene;
+mod serial;
 
 use bootloader_api::{entry_point, BootInfo};
 use core::panic::PanicInfo;
@@ -20,17 +22,33 @@ use crate::scene::Scene;
 entry_point!(kernel_main);
 
 fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
+    serial::init();
+    serial_println!("[lumen] serial up");
+
     if let Some(boot_fb) = boot_info.framebuffer.as_mut() {
+        let info = boot_fb.info();
+        serial_println!(
+            "[lumen] framebuffer {}x{} ({:?}, {} bpp)",
+            info.width,
+            info.height,
+            info.pixel_format,
+            info.bytes_per_pixel
+        );
         display::init(boot_fb);
+    } else {
+        serial_println!("[lumen] no framebuffer provided by bootloader");
     }
 
     arch::init();
+    serial_println!("[lumen] arch ready (gdt/idt/pic/pit/ps2)");
 
     let (width, height) = display::dimensions().unwrap_or((1280, 720));
     let mut scene = Scene::new(width, height);
     display::cache_background(|fb| scene.draw_background(fb));
 
-    let dt = 1.0_f32 / 60.0;
+    serial_println!("[lumen] entering main loop");
+
+    let dt = 1.0 / arch::TICK_HZ as f32;
     let mut last_seen: u64 = 0;
 
     let empty = Snapshot {
@@ -66,8 +84,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 }
 
 #[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
+fn panic(info: &PanicInfo) -> ! {
+    x86_64::instructions::interrupts::disable();
+    serial::force_print(format_args!("\n[lumen] KERNEL PANIC: {}\n", info));
     loop {
-        unsafe { core::arch::asm!("hlt", options(nomem, nostack)); }
+        x86_64::instructions::hlt();
     }
 }

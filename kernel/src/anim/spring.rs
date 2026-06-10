@@ -37,4 +37,9 @@ impl Spring {
     pub fn nudge(&mut self, velocity: f32) {
         self.velocity += velocity;
     }
+
+    #[allow(dead_code)]
+    pub fn is_settled(&self, epsilon: f32) -> bool {
+        (self.current - self.target).abs() < epsilon && self.velocity.abs() < epsilon
+    }
 }

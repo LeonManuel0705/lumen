@@ -28,6 +28,13 @@ pub fn init(fb: &'static mut BootFb) {
     let buf = fb.buffer_mut();
     let front = buf.as_mut_ptr();
     let front_len = buf.len();
+    if front_len > MAX_BYTES {
+        crate::serial_println!(
+            "[display] framebuffer is {} bytes but MAX_BYTES is {}, bottom rows will not render",
+            front_len,
+            MAX_BYTES
+        );
+    }
     *DISPLAY.lock() = Some(Display { front, front_len, info });
 }
 

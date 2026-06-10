@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 pub fn ease_in_quad(t: f32) -> f32 { t * t }
 
 pub fn ease_out_quad(t: f32) -> f32 { 1.0 - (1.0 - t) * (1.0 - t) }

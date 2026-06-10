@@ -18,7 +18,10 @@ pub fn box_blur_region(fb: &mut Framebuffer, x: i32, y: i32, w: i32, h: i32, rad
 
     let region_w = x_end - x_start;
     let region_h = y_end - y_start;
-    if region_w > MAX_LINE || region_h > MAX_LINE { return; }
+    if region_w > MAX_LINE || region_h > MAX_LINE {
+        crate::serial_println!("[blur] region {}x{} exceeds MAX_LINE {}, skipping", region_w, region_h, MAX_LINE);
+        return;
+    }
 
     for _ in 0..passes {
         for ry in y_start..y_end {

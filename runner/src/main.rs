@@ -36,11 +36,16 @@ fn main() {
     let bios_image = out_dir.join("lumen-bios.img");
 
     println!("\x1b[35m[lumen]\x1b[0m assembling BIOS disk image...");
+    let mut boot_config = bootloader::BootConfig::default();
+    boot_config.frame_buffer.minimum_framebuffer_width = Some(1280);
+    boot_config.frame_buffer.minimum_framebuffer_height = Some(720);
     bootloader::BiosBoot::new(&kernel_elf)
+        .set_boot_config(&boot_config)
         .create_disk_image(&bios_image)
         .expect("failed to create disk image");
 
     println!("\x1b[35m[lumen]\x1b[0m booting in QEMU...");
+    let display = std::env::var("LUMEN_DISPLAY").unwrap_or_else(|_| "default,show-cursor=on".into());
     let status = Command::new("qemu-system-x86_64")
         .args([
             "-drive",
@@ -50,13 +55,15 @@ fn main() {
             "-serial",
             "stdio",
             "-display",
-            "default,show-cursor=on",
+            &display,
+            "-no-reboot",
         ])
         .status()
         .expect("failed to launch qemu-system-x86_64");
 
     if !status.success() {
         eprintln!("qemu exited with status: {status}");
+        std::process::exit(status.code().unwrap_or(1));
     }
 }
 

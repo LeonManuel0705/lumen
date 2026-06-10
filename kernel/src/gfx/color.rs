@@ -7,7 +7,9 @@ pub struct Color {
 }
 
 impl Color {
+    #[allow(dead_code)]
     pub const TRANSPARENT: Color = Color::rgba(0, 0, 0, 0);
+    #[allow(dead_code)]
     pub const BLACK:       Color = Color::rgb(0, 0, 0);
     pub const WHITE:       Color = Color::rgb(255, 255, 255);
 
