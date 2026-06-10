@@ -1,5 +1,5 @@
-use crate::anim::Spring;
-use crate::gfx::{shapes, Color, Framebuffer};
+use crate::anim::{easing, Spring, Tween};
+use crate::gfx::{font_data, shapes, text, Color, Framebuffer};
 use crate::input::Snapshot;
 
 const TRAIL_LEN: usize = 22;
@@ -20,7 +20,7 @@ struct Ripple {
 pub struct Scene {
     width: f32,
     height: f32,
-    elapsed: f32,
+    clock_phase: f32,
     ball_x: f32,
     ball_y: f32,
     vx: f32,
@@ -37,6 +37,10 @@ pub struct Scene {
     cursor_y: Spring,
     ripples: [Ripple; MAX_RIPPLES],
     next_ripple: usize,
+    clock_chars: [u8; 8],
+    clock_prev: [u8; 8],
+    clock_anim: [f32; 8],
+    clock_entrance: Tween,
 }
 
 impl Scene {
@@ -48,7 +52,7 @@ impl Scene {
         Self {
             width: w,
             height: h,
-            elapsed: 0.0,
+            clock_phase: 0.0,
             ball_x: mid_x,
             ball_y: BALL_RADIUS + 10.0,
             vx: 220.0,
@@ -65,11 +69,41 @@ impl Scene {
             cursor_y: Spring::new(mid_y, 8000.0, 200.0),
             ripples: [Ripple { x: 0.0, y: 0.0, age: 0.0, alive: false }; MAX_RIPPLES],
             next_ripple: 0,
+            clock_chars: [0; 8],
+            clock_prev: [0; 8],
+            clock_anim: [1.0; 8],
+            clock_entrance: Tween::new(0.7, 0.35),
         }
     }
 
+    pub fn set_clock(&mut self, day_seconds: u32) {
+        let h = (day_seconds / 3600) % 24;
+        let m = (day_seconds / 60) % 60;
+        let s = day_seconds % 60;
+        let new = [
+            b'0' + (h / 10) as u8, b'0' + (h % 10) as u8, b':',
+            b'0' + (m / 10) as u8, b'0' + (m % 10) as u8, b':',
+            b'0' + (s / 10) as u8, b'0' + (s % 10) as u8,
+        ];
+        if self.clock_chars[0] == 0 {
+            self.clock_chars = new;
+            self.clock_prev = new;
+            return;
+        }
+        for i in 0..8 {
+            if new[i] != self.clock_chars[i] {
+                self.clock_prev[i] = self.clock_chars[i];
+                self.clock_anim[i] = 0.0;
+            }
+        }
+        self.clock_chars = new;
+    }
+
     pub fn update(&mut self, dt: f32, input: &Snapshot) {
-        self.elapsed += dt;
+        self.clock_phase += dt;
+        if self.clock_phase >= 1.0 {
+            self.clock_phase -= 1.0;
+        }
 
         self.cursor_target_x = (self.cursor_target_x + input.mouse_dx as f32).clamp(0.0, self.width - 1.0);
         self.cursor_target_y = (self.cursor_target_y + input.mouse_dy as f32).clamp(0.0, self.height - 1.0);
@@ -152,6 +186,11 @@ impl Scene {
         self.trail[self.trail_idx] = (self.ball_x, self.ball_y);
         self.trail_idx = (self.trail_idx + 1) % TRAIL_LEN;
 
+        self.clock_entrance.step(dt);
+        for a in self.clock_anim.iter_mut() {
+            *a = (*a + dt / 0.28).min(1.0);
+        }
+
         for r in self.ripples.iter_mut() {
             if !r.alive { continue; }
             r.age += dt;
@@ -229,6 +268,52 @@ impl Scene {
         ((w - dock_w) / 2, h - dock_h - 22, dock_w, dock_h)
     }
 
+    fn draw_clock(&self, fb: &mut Framebuffer) {
+        let t_in = self.clock_entrance.t();
+        if t_in <= 0.0 || self.clock_chars[0] == 0 {
+            return;
+        }
+        let font = &font_data::FONT_CLOCK;
+        let (bx, by, bw, bh) = self.top_bar_rect();
+
+        let master = easing::ease_out_quad(t_in);
+        let rise = ((1.0 - easing::ease_out_back(t_in)) * 14.0) as i32;
+
+        let digit_h = font.glyph('0').map(|g| g.h as i32).unwrap_or(20);
+        let colon_adv = font.glyph(':').map(|g| g.advance as i32).unwrap_or(8);
+        let cell = font.digit_advance as i32;
+        let lift = (digit_h as f32 * 0.65) as i32;
+        let total = 6 * cell + 2 * colon_adv;
+        let mut pen = bx + (bw - total) / 2;
+        let baseline = by + (bh + digit_h) / 2 + rise;
+
+        let frac = self.clock_phase;
+        let pulse = 4.0 * frac * (1.0 - frac);
+
+        for i in 0..8 {
+            let c = self.clock_chars[i] as char;
+            if c == ':' {
+                let alpha = (master * (140.0 + 90.0 * pulse)) as u8;
+                draw_clock_glyph(fb, font, ':', pen, baseline, alpha);
+                pen += colon_adv;
+                continue;
+            }
+            let centered = |ch: char| pen + (cell - font.glyph(ch).map(|g| g.advance as i32).unwrap_or(cell)) / 2;
+            let p = self.clock_anim[i];
+            if p >= 1.0 {
+                draw_clock_glyph(fb, font, c, centered(c), baseline, (master * 235.0) as u8);
+            } else {
+                let pe = easing::ease_out_quad(p);
+                let prev = self.clock_prev[i] as char;
+                let off_old = (-pe * lift as f32) as i32;
+                let off_new = ((1.0 - pe) * lift as f32) as i32;
+                draw_clock_glyph(fb, font, prev, centered(prev), baseline + off_old, (master * (1.0 - pe) * 235.0) as u8);
+                draw_clock_glyph(fb, font, c, centered(c), baseline + off_new, (master * pe * 235.0) as u8);
+            }
+            pen += cell;
+        }
+    }
+
     pub fn draw(&self, fb: &mut Framebuffer) {
         let floor_y = (self.height - FLOOR_FROM_BOTTOM) as i32;
 
@@ -299,6 +384,8 @@ impl Scene {
             shapes::stroke_circle(fb, r.x as i32, r.y as i32, (radius - 8).max(1), 2, Color::LUMEN_ACCENT.with_alpha(alpha / 2));
         }
 
+        self.draw_clock(fb);
+
         let cx = self.cursor_x.current as i32;
         let cy = self.cursor_y.current as i32;
         shapes::fill_circle(fb, cx, cy, 22, Color::LUMEN_ACCENT.with_alpha(35));
@@ -306,4 +393,12 @@ impl Scene {
         shapes::fill_circle(fb, cx, cy, 7,  Color::WHITE.with_alpha(220));
         shapes::fill_circle(fb, cx, cy, 3,  Color::WHITE);
     }
+}
+
+fn draw_clock_glyph(fb: &mut Framebuffer, font: &text::Font, c: char, x: i32, baseline: i32, alpha: u8) {
+    if alpha < 4 {
+        return;
+    }
+    text::draw_char(fb, font, c, x, baseline + 1, Color::WHITE.with_alpha((alpha as u32 * 70 / 255) as u8));
+    text::draw_char(fb, font, c, x, baseline, Color::LUMEN_INK.with_alpha(alpha));
 }
