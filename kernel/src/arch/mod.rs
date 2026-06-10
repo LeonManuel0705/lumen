@@ -2,6 +2,7 @@ pub mod gdt;
 pub mod idt;
 pub mod pic;
 pub mod pit;
+pub mod rtc;
 
 pub const TICK_HZ: u32 = 60;
 

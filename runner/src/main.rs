@@ -46,18 +46,23 @@ fn main() {
 
     println!("\x1b[35m[lumen]\x1b[0m booting in QEMU...");
     let display = std::env::var("LUMEN_DISPLAY").unwrap_or_else(|_| "default,show-cursor=on".into());
-    let status = Command::new("qemu-system-x86_64")
-        .args([
-            "-drive",
-            &format!("format=raw,file={}", bios_image.display()),
-            "-m",
-            "256M",
-            "-serial",
-            "stdio",
-            "-display",
-            &display,
-            "-no-reboot",
-        ])
+    let extra = std::env::var("LUMEN_QEMU_ARGS").unwrap_or_default();
+    let mut qemu = Command::new("qemu-system-x86_64");
+    qemu.args([
+        "-drive",
+        &format!("format=raw,file={}", bios_image.display()),
+        "-m",
+        "256M",
+        "-serial",
+        "stdio",
+        "-display",
+        &display,
+        "-rtc",
+        "base=localtime",
+        "-no-reboot",
+    ]);
+    qemu.args(extra.split_whitespace());
+    let status = qemu
         .status()
         .expect("failed to launch qemu-system-x86_64");
 

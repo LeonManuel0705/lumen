@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["kernel", "runner"]
+members = ["kernel", "runner", "tools/fontgen"]
 default-members = ["runner"]
 
 [profile.dev]
