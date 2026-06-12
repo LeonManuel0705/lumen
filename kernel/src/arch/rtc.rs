@@ -6,6 +6,45 @@ pub struct Time {
     pub seconds: u8,
 }
 
+pub struct Date {
+    pub year: u32,
+    pub month: u8,
+    pub day: u8,
+}
+
+pub fn read_date() -> Date {
+    let mut prev = read_date_raw();
+    for _ in 0..16 {
+        let cur = read_date_raw();
+        if cur == prev {
+            return decode_date(cur);
+        }
+        prev = cur;
+    }
+    decode_date(prev)
+}
+
+fn read_date_raw() -> (u8, u8, u8, u8) {
+    for _ in 0..1_000_000 {
+        if reg(0x0A) & 0x80 == 0 {
+            break;
+        }
+    }
+    (reg(0x07), reg(0x08), reg(0x09), reg(0x0B))
+}
+
+fn decode_date((d, m, y, status_b): (u8, u8, u8, u8)) -> Date {
+    let bcd = status_b & 0x04 == 0;
+    let day = if bcd { from_bcd(d) } else { d };
+    let month = if bcd { from_bcd(m) } else { m };
+    let year = if bcd { from_bcd(y) } else { y };
+    Date {
+        year: 2000 + year as u32,
+        month: month.clamp(1, 12),
+        day: day.clamp(1, 31),
+    }
+}
+
 // Blocks until the RTC second rolls over (up to ~1s), so the returned time is
 // sampled at a known second boundary. Boot-time only; too slow for the frame loop.
 pub fn read_at_edge() -> Time {
