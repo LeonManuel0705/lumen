@@ -4,12 +4,14 @@
 
 mod anim;
 mod arch;
+mod datefmt;
 mod display;
 mod gfx;
 mod input;
 mod rng;
 mod scene;
 mod serial;
+mod widgets;
 
 use bootloader_api::{entry_point, BootInfo};
 use core::panic::PanicInfo;
@@ -53,15 +55,28 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let mut tick_origin = TICKS.load(Ordering::Relaxed);
     let mut last_sync = tick_origin;
 
+    let boot_date = arch::rtc::read_date();
+    let mut date_buf = [0u8; 48];
+    let date_len = datefmt::format_german(&boot_date, &mut date_buf);
+    serial_println!(
+        "[lumen] date {:04}-{:02}-{:02} ({})",
+        boot_date.year,
+        boot_date.month,
+        boot_date.day,
+        core::str::from_utf8(&date_buf[..date_len]).unwrap_or("?")
+    );
+
     let (width, height) = display::dimensions().unwrap_or((1280, 720));
     let mut scene = Scene::new(width, height);
     scene.set_clock(day_base);
+    scene.set_date(&date_buf[..date_len]);
     display::cache_background(|fb| scene.draw_background(fb));
 
     serial_println!("[lumen] entering main loop");
 
     let dt = 1.0 / arch::TICK_HZ as f32;
     let mut last_seen: u64 = 0;
+    let mut last_shown = day_base;
 
     let empty = Snapshot {
         mouse_dx: 0,
@@ -93,8 +108,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                 day_base = rtc_day;
                 tick_origin = now;
             }
+            refresh_date(&mut scene, &mut date_buf);
         }
-        scene.set_clock((day_base + ticks_to_secs(now - tick_origin) as u32) % 86_400);
+        let shown = (day_base + ticks_to_secs(now - tick_origin) as u32) % 86_400;
+        if shown < last_shown {
+            refresh_date(&mut scene, &mut date_buf);
+        }
+        last_shown = shown;
+        scene.set_clock(shown);
 
         let real_input = input::snapshot();
         let mut applied = false;
@@ -105,10 +126,20 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
         last_seen = now;
 
+        if scene.take_chrome_bake() {
+            display::cache_background(|fb| scene.draw_background(fb));
+        }
+
         display::render(|fb| scene.draw(fb));
 
         x86_64::instructions::interrupts::enable_and_hlt();
     }
+}
+
+fn refresh_date(scene: &mut Scene, buf: &mut [u8; 48]) {
+    let d = arch::rtc::read_date();
+    let n = datefmt::format_german(&d, buf);
+    scene.set_date(&buf[..n]);
 }
 
 fn day_seconds(t: &arch::rtc::Time) -> u32 {

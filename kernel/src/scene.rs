@@ -1,6 +1,14 @@
 use crate::anim::{easing, Spring, Tween};
-use crate::gfx::{font_data, shapes, text, Color, Framebuffer};
+use crate::gfx::{font_data, shapes, Color, Framebuffer};
 use crate::input::Snapshot;
+use crate::widgets::{self, RollingClock};
+
+#[derive(PartialEq, Copy, Clone)]
+enum ShellMode {
+    Locked,
+    Unlocking,
+    Desktop,
+}
 
 const TRAIL_LEN: usize = 22;
 const FLOOR_FROM_BOTTOM: f32 = 110.0;
@@ -37,10 +45,15 @@ pub struct Scene {
     cursor_y: Spring,
     ripples: [Ripple; MAX_RIPPLES],
     next_ripple: usize,
-    clock_chars: [u8; 8],
-    clock_prev: [u8; 8],
-    clock_anim: [f32; 8],
+    mode: ShellMode,
+    top_clock: RollingClock,
+    big_clock: RollingClock,
     clock_entrance: Tween,
+    lock_entrance: Tween,
+    unlock: Tween,
+    chrome_bake: bool,
+    date_buf: [u8; 48],
+    date_len: usize,
 }
 
 impl Scene {
@@ -69,34 +82,45 @@ impl Scene {
             cursor_y: Spring::new(mid_y, 8000.0, 200.0),
             ripples: [Ripple { x: 0.0, y: 0.0, age: 0.0, alive: false }; MAX_RIPPLES],
             next_ripple: 0,
-            clock_chars: [0; 8],
-            clock_prev: [0; 8],
-            clock_anim: [1.0; 8],
+            mode: ShellMode::Locked,
+            top_clock: RollingClock::new(&font_data::FONT_CLOCK, true),
+            big_clock: RollingClock::new(&font_data::FONT_BIG, false),
             clock_entrance: Tween::new(0.7, 0.35),
+            lock_entrance: Tween::new(0.8, 0.3),
+            unlock: Tween::new(0.55, 0.0),
+            chrome_bake: false,
+            date_buf: [0; 48],
+            date_len: 0,
         }
     }
 
     pub fn set_clock(&mut self, day_seconds: u32) {
-        let h = (day_seconds / 3600) % 24;
-        let m = (day_seconds / 60) % 60;
-        let s = day_seconds % 60;
-        let new = [
-            b'0' + (h / 10) as u8, b'0' + (h % 10) as u8, b':',
-            b'0' + (m / 10) as u8, b'0' + (m % 10) as u8, b':',
-            b'0' + (s / 10) as u8, b'0' + (s % 10) as u8,
-        ];
-        if self.clock_chars[0] == 0 {
-            self.clock_chars = new;
-            self.clock_prev = new;
-            return;
-        }
-        for i in 0..8 {
-            if new[i] != self.clock_chars[i] {
-                self.clock_prev[i] = self.clock_chars[i];
-                self.clock_anim[i] = 0.0;
-            }
-        }
-        self.clock_chars = new;
+        self.top_clock.set(day_seconds);
+        self.big_clock.set(day_seconds);
+    }
+
+    pub fn set_date(&mut self, bytes: &[u8]) {
+        let n = bytes.len().min(self.date_buf.len());
+        self.date_buf[..n].copy_from_slice(&bytes[..n]);
+        self.date_len = n;
+    }
+
+    pub fn take_chrome_bake(&mut self) -> bool {
+        let b = self.chrome_bake;
+        self.chrome_bake = false;
+        b
+    }
+
+    fn begin_unlock(&mut self) {
+        self.mode = ShellMode::Unlocking;
+        self.unlock.restart();
+        self.clock_entrance.restart();
+        self.chrome_bake = true;
+        self.ball_x = self.width * 0.5;
+        self.ball_y = BALL_RADIUS + 10.0;
+        self.vx = 220.0;
+        self.vy = 0.0;
+        self.trail = [(self.ball_x, self.ball_y); TRAIL_LEN];
     }
 
     pub fn update(&mut self, dt: f32, input: &Snapshot) {
@@ -112,70 +136,79 @@ impl Scene {
         self.cursor_x.step(dt);
         self.cursor_y.step(dt);
 
-        if input.buttons_just_pressed & 0x01 != 0 {
-            let click_x = self.cursor_x.current;
-            let click_y = self.cursor_y.current;
-            self.spawn_ripple(click_x, click_y);
-            let dx = click_x - self.ball_x;
-            let dy = click_y - self.ball_y;
-            let len_sq = dx * dx + dy * dy;
-            if len_sq < (BALL_RADIUS * 1.4) * (BALL_RADIUS * 1.4) {
-                let scale = if len_sq > 4.0 { 1.0 / BALL_RADIUS } else { 0.0 };
-                self.vx = -dx * scale * 760.0;
-                self.vy = -dy * scale * 760.0 - 320.0;
-                self.squash.nudge(-15.0);
-                self.pulse.nudge(-3.0);
+        if self.mode == ShellMode::Locked {
+            if input.buttons_just_pressed & 0x01 != 0 {
+                self.spawn_ripple(self.cursor_x.current, self.cursor_y.current);
             }
-        }
+            if input.key_pressed_space || input.buttons_just_pressed & 0x01 != 0 {
+                self.begin_unlock();
+            }
+        } else {
+            if input.buttons_just_pressed & 0x01 != 0 {
+                let click_x = self.cursor_x.current;
+                let click_y = self.cursor_y.current;
+                self.spawn_ripple(click_x, click_y);
+                let dx = click_x - self.ball_x;
+                let dy = click_y - self.ball_y;
+                let len_sq = dx * dx + dy * dy;
+                if self.mode == ShellMode::Desktop && len_sq < (BALL_RADIUS * 1.4) * (BALL_RADIUS * 1.4) {
+                    let scale = if len_sq > 4.0 { 1.0 / BALL_RADIUS } else { 0.0 };
+                    self.vx = -dx * scale * 760.0;
+                    self.vy = -dy * scale * 760.0 - 320.0;
+                    self.squash.nudge(-15.0);
+                    self.pulse.nudge(-3.0);
+                }
+            }
 
-        if input.key_pressed_space {
-            self.vy = -780.0;
-            self.vx += crate::rng::sign() * 80.0;
-            self.squash.nudge(-10.0);
-            self.pulse.nudge(-2.0);
-        }
-
-        if input.key_pressed_r {
-            self.ball_x = self.width * 0.5;
-            self.ball_y = BALL_RADIUS + 10.0;
-            self.vx = 220.0;
-            self.vy = 0.0;
-            self.trail = [(self.ball_x, self.ball_y); TRAIL_LEN];
-        }
-
-        self.vy += GRAVITY * dt;
-        self.ball_x += self.vx * dt;
-        self.ball_y += self.vy * dt;
-
-        let floor_y = self.height - FLOOR_FROM_BOTTOM;
-
-        if self.ball_x - BALL_RADIUS < 0.0 {
-            self.ball_x = BALL_RADIUS;
-            self.vx = self.vx.abs() * 0.88;
-            self.squash.nudge(8.0);
-            self.pulse.nudge(-2.0);
-        }
-        if self.ball_x + BALL_RADIUS > self.width {
-            self.ball_x = self.width - BALL_RADIUS;
-            self.vx = -self.vx.abs() * 0.88;
-            self.squash.nudge(8.0);
-            self.pulse.nudge(-2.0);
-        }
-        if self.ball_y + BALL_RADIUS > floor_y {
-            self.ball_y = floor_y - BALL_RADIUS;
-            if self.vy.abs() < 60.0 {
-                self.vy = -560.0;
+            if self.mode == ShellMode::Desktop && input.key_pressed_space {
+                self.vy = -780.0;
                 self.vx += crate::rng::sign() * 80.0;
-            } else {
-                self.vy = -self.vy.abs() * 0.84;
+                self.squash.nudge(-10.0);
+                self.pulse.nudge(-2.0);
             }
-            self.squash.nudge(-12.0);
-            self.pulse.nudge(-4.0);
-        }
-        if self.ball_y - BALL_RADIUS < 0.0 {
-            self.ball_y = BALL_RADIUS;
-            self.vy = self.vy.abs() * 0.7;
-            self.squash.nudge(-6.0);
+
+            if self.mode == ShellMode::Desktop && input.key_pressed_r {
+                self.ball_x = self.width * 0.5;
+                self.ball_y = BALL_RADIUS + 10.0;
+                self.vx = 220.0;
+                self.vy = 0.0;
+                self.trail = [(self.ball_x, self.ball_y); TRAIL_LEN];
+            }
+
+            self.vy += GRAVITY * dt;
+            self.ball_x += self.vx * dt;
+            self.ball_y += self.vy * dt;
+
+            let floor_y = self.height - FLOOR_FROM_BOTTOM;
+
+            if self.ball_x - BALL_RADIUS < 0.0 {
+                self.ball_x = BALL_RADIUS;
+                self.vx = self.vx.abs() * 0.88;
+                self.squash.nudge(8.0);
+                self.pulse.nudge(-2.0);
+            }
+            if self.ball_x + BALL_RADIUS > self.width {
+                self.ball_x = self.width - BALL_RADIUS;
+                self.vx = -self.vx.abs() * 0.88;
+                self.squash.nudge(8.0);
+                self.pulse.nudge(-2.0);
+            }
+            if self.ball_y + BALL_RADIUS > floor_y {
+                self.ball_y = floor_y - BALL_RADIUS;
+                if self.vy.abs() < 60.0 {
+                    self.vy = -560.0;
+                    self.vx += crate::rng::sign() * 80.0;
+                } else {
+                    self.vy = -self.vy.abs() * 0.84;
+                }
+                self.squash.nudge(-12.0);
+                self.pulse.nudge(-4.0);
+            }
+            if self.ball_y - BALL_RADIUS < 0.0 {
+                self.ball_y = BALL_RADIUS;
+                self.vy = self.vy.abs() * 0.7;
+                self.squash.nudge(-6.0);
+            }
         }
 
         self.squash.set_target(0.0);
@@ -187,9 +220,17 @@ impl Scene {
         self.trail_idx = (self.trail_idx + 1) % TRAIL_LEN;
 
         self.clock_entrance.step(dt);
-        for a in self.clock_anim.iter_mut() {
-            *a = (*a + dt / 0.28).min(1.0);
+        if self.mode == ShellMode::Locked {
+            self.lock_entrance.step(dt);
         }
+        if self.mode == ShellMode::Unlocking {
+            self.unlock.step(dt);
+            if self.unlock.is_done() {
+                self.mode = ShellMode::Desktop;
+            }
+        }
+        self.top_clock.update(dt);
+        self.big_clock.update(dt);
 
         for r in self.ripples.iter_mut() {
             if !r.alive { continue; }
@@ -225,6 +266,10 @@ impl Scene {
         let floor_y = (self.height - FLOOR_FROM_BOTTOM) as i32;
         shapes::fill_rect(fb, 0, floor_y, w, h - floor_y, Color::rgba(255, 255, 255, 70));
         shapes::fill_rect(fb, 0, floor_y, w, 1, Color::rgba(255, 255, 255, 200));
+
+        if self.mode == ShellMode::Locked {
+            return;
+        }
 
         let (bx, by, bw, bh) = self.top_bar_rect();
         crate::gfx::blur::box_blur_region(fb, bx - 8, by - 8, bw + 16, bh + 16, 14, 2);
@@ -268,53 +313,73 @@ impl Scene {
         ((w - dock_w) / 2, h - dock_h - 22, dock_w, dock_h)
     }
 
-    fn draw_clock(&self, fb: &mut Framebuffer) {
+    fn draw_top_clock(&self, fb: &mut Framebuffer) {
         let t_in = self.clock_entrance.t();
-        if t_in <= 0.0 || self.clock_chars[0] == 0 {
+        if t_in <= 0.0 {
             return;
         }
-        let font = &font_data::FONT_CLOCK;
         let (bx, by, bw, bh) = self.top_bar_rect();
-
         let master = easing::ease_out_quad(t_in);
         let rise = ((1.0 - easing::ease_out_back(t_in)) * 14.0) as i32;
+        let baseline = by + (bh + self.top_clock.digit_height()) / 2 + rise;
+        let pulse = 4.0 * self.clock_phase * (1.0 - self.clock_phase);
+        self.top_clock.draw(fb, bx + bw / 2, baseline, master, pulse);
+    }
 
-        let digit_h = font.glyph('0').map(|g| g.h as i32).unwrap_or(20);
-        let colon_adv = font.glyph(':').map(|g| g.advance as i32).unwrap_or(8);
-        let cell = font.digit_advance as i32;
-        let lift = (digit_h as f32 * 0.65) as i32;
-        let total = 6 * cell + 2 * colon_adv;
-        let mut pen = bx + (bw - total) / 2;
-        let baseline = by + (bh + digit_h) / 2 + rise;
-
-        let frac = self.clock_phase;
-        let pulse = 4.0 * frac * (1.0 - frac);
-
-        for i in 0..8 {
-            let c = self.clock_chars[i] as char;
-            if c == ':' {
-                let alpha = (master * (140.0 + 90.0 * pulse)) as u8;
-                draw_clock_glyph(fb, font, ':', pen, baseline, alpha);
-                pen += colon_adv;
-                continue;
-            }
-            let centered = |ch: char| pen + (cell - font.glyph(ch).map(|g| g.advance as i32).unwrap_or(cell)) / 2;
-            let p = self.clock_anim[i];
-            if p >= 1.0 {
-                draw_clock_glyph(fb, font, c, centered(c), baseline, (master * 235.0) as u8);
-            } else {
-                let pe = easing::ease_out_quad(p);
-                let prev = self.clock_prev[i] as char;
-                let off_old = (-pe * lift as f32) as i32;
-                let off_new = ((1.0 - pe) * lift as f32) as i32;
-                draw_clock_glyph(fb, font, prev, centered(prev), baseline + off_old, (master * (1.0 - pe) * 235.0) as u8);
-                draw_clock_glyph(fb, font, c, centered(c), baseline + off_new, (master * pe * 235.0) as u8);
-            }
-            pen += cell;
+    fn draw_lock(&self, fb: &mut Framebuffer) {
+        let t_in = self.lock_entrance.t();
+        let t_out = self.unlock.t();
+        let master = easing::ease_out_quad(t_in) * (1.0 - t_out);
+        if master <= 0.01 {
+            return;
         }
+        let rise = ((1.0 - easing::ease_out_back(t_in)) * 24.0) as i32;
+        let slide = (easing::ease_in_quad(t_out) * self.height * 0.45) as i32;
+        let cx = (self.width * 0.5) as i32;
+        let big_baseline = (self.height * 0.382) as i32 + rise - slide;
+        let pulse = 4.0 * self.clock_phase * (1.0 - self.clock_phase);
+
+        self.big_clock.draw(fb, cx, big_baseline, master, pulse);
+
+        if self.date_len > 0 {
+            if let Ok(date) = core::str::from_utf8(&self.date_buf[..self.date_len]) {
+                widgets::text_embossed(fb, &font_data::FONT_UI, date, cx, big_baseline + 66, (master * 220.0) as u8);
+            }
+        }
+
+        let hint_alpha = master * (110.0 + 70.0 * pulse);
+        let hint_y = (self.height - 110.0) as i32 - slide / 3;
+        widgets::text_embossed(fb, &font_data::FONT_UI, "Leertaste oder Klick zum Entsperren", cx, hint_y, hint_alpha as u8);
     }
 
     pub fn draw(&self, fb: &mut Framebuffer) {
+        if self.mode != ShellMode::Locked {
+            self.draw_desktop(fb);
+        }
+
+        for r in &self.ripples {
+            if !r.alive { continue; }
+            let t = r.age / RIPPLE_LIFETIME;
+            let radius = (16.0 + t * 180.0) as i32;
+            let alpha = ((1.0 - t) * (1.0 - t) * 200.0) as u8;
+            if alpha < 6 { continue; }
+            shapes::stroke_circle(fb, r.x as i32, r.y as i32, radius, 3, Color::WHITE.with_alpha(alpha));
+            shapes::stroke_circle(fb, r.x as i32, r.y as i32, (radius - 8).max(1), 2, Color::LUMEN_ACCENT.with_alpha(alpha / 2));
+        }
+
+        if self.mode != ShellMode::Desktop {
+            self.draw_lock(fb);
+        }
+
+        let cx = self.cursor_x.current as i32;
+        let cy = self.cursor_y.current as i32;
+        shapes::fill_circle(fb, cx, cy, 22, Color::LUMEN_ACCENT.with_alpha(35));
+        shapes::fill_circle(fb, cx, cy, 14, Color::LUMEN_ACCENT.with_alpha(110));
+        shapes::fill_circle(fb, cx, cy, 7,  Color::WHITE.with_alpha(220));
+        shapes::fill_circle(fb, cx, cy, 3,  Color::WHITE);
+    }
+
+    fn draw_desktop(&self, fb: &mut Framebuffer) {
         let floor_y = (self.height - FLOOR_FROM_BOTTOM) as i32;
 
         for i in 0..TRAIL_LEN {
@@ -374,31 +439,6 @@ impl Scene {
             Color::rgba(255, 255, 255, 200),
         );
 
-        for r in &self.ripples {
-            if !r.alive { continue; }
-            let t = r.age / RIPPLE_LIFETIME;
-            let radius = (16.0 + t * 180.0) as i32;
-            let alpha = ((1.0 - t) * (1.0 - t) * 200.0) as u8;
-            if alpha < 6 { continue; }
-            shapes::stroke_circle(fb, r.x as i32, r.y as i32, radius, 3, Color::WHITE.with_alpha(alpha));
-            shapes::stroke_circle(fb, r.x as i32, r.y as i32, (radius - 8).max(1), 2, Color::LUMEN_ACCENT.with_alpha(alpha / 2));
-        }
-
-        self.draw_clock(fb);
-
-        let cx = self.cursor_x.current as i32;
-        let cy = self.cursor_y.current as i32;
-        shapes::fill_circle(fb, cx, cy, 22, Color::LUMEN_ACCENT.with_alpha(35));
-        shapes::fill_circle(fb, cx, cy, 14, Color::LUMEN_ACCENT.with_alpha(110));
-        shapes::fill_circle(fb, cx, cy, 7,  Color::WHITE.with_alpha(220));
-        shapes::fill_circle(fb, cx, cy, 3,  Color::WHITE);
+        self.draw_top_clock(fb);
     }
-}
-
-fn draw_clock_glyph(fb: &mut Framebuffer, font: &text::Font, c: char, x: i32, baseline: i32, alpha: u8) {
-    if alpha < 4 {
-        return;
-    }
-    text::draw_char(fb, font, c, x, baseline + 1, Color::WHITE.with_alpha((alpha as u32 * 70 / 255) as u8));
-    text::draw_char(fb, font, c, x, baseline, Color::LUMEN_INK.with_alpha(alpha));
 }
