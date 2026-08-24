@@ -35,6 +35,8 @@ latency all become kernel concerns.
 * Alpha compositing, rounded rectangles, circles and antialiased edges written by hand
 * Bitmap text rendering from a font atlas that is generated at build time by a host side
   tool and embedded into the kernel binary
+* A lock screen as the boot destination: large rolling clock, the date spelled out in
+  German from the CMOS date registers, and an animated unlock into the desktop
 
 **Animation**
 
@@ -57,8 +59,8 @@ cargo run
 That builds the kernel for `x86_64-unknown-none`, assembles a bootable BIOS disk image,
 and launches QEMU at 1280x720 with the host clock passed through.
 
-Controls in the current build: click the ball to throw it, space to make it jump, R to
-reset the scene.
+The current build boots into a lock screen. Space or a click unlocks it. On the desktop,
+click the ball to throw it, space to make it jump, R to reset the scene.
 
 | Variable | Effect |
 |:---|:---|
@@ -85,10 +87,15 @@ unpinned nightly breaks the build roughly once a month.
 
 ## Status
 
-The kernel boots, keeps time, renders its interface, and handles keyboard and mouse input.
-Phases zero through three of the plan are complete: bare metal boot, the graphics stack,
-the animation system, and input. What comes next is memory management with a real heap,
-then a window compositor, then applications running inside it.
+What runs today: the kernel boots, sets up its own descriptor tables and interrupts, keeps
+the real date and time from the CMOS clock, and comes up in a lock screen with a 96 pixel
+rolling clock and the German date. Space or a click plays a 0.55 second unlock into the
+desktop, where the animation and input demo lives. Keyboard and mouse are decoded from the
+PS/2 controller.
+
+There is no heap yet. Every buffer in the kernel is static or on the stack, which is the
+constraint that currently shapes the graphics code and the thing a window compositor would
+need solved first.
 
 ## License
 
