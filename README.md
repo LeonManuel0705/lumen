@@ -6,7 +6,7 @@ the whole compositor runs on bare metal with no standard library underneath it.
 
 Lumen boots on `x86_64`, talks directly to the hardware, and draws its own interface into
 a linear framebuffer. There is no libc, no allocator from a crate registry doing the heavy
-lifting, and no graphics stack. Roughly 3,700 lines of `no_std` Rust sit between the
+lifting, and no graphics stack. Roughly 4,200 lines of `no_std` Rust sit between the
 bootloader handoff and the pixels.
 
 ## Why build this
@@ -44,6 +44,9 @@ latency all become kernel concerns.
   drag by the title bar, and scale in and out of existence. The glass they are made of
   reads its frosted backdrop from a blurred copy of the wallpaper rather than blurring
   the screen again every frame
+* Damage tracking: a frame repaints only the regions that changed, with a clip rectangle
+  carried through the drawing primitives so they narrow their loops to it instead of
+  drawing pixels that will be thrown away
 
 **Animation**
 
@@ -113,9 +116,17 @@ lock screen with a 96 pixel rolling clock and the German date. Space or a click 
 0.55 second unlock into the desktop, where a compositor puts app windows on screen over a
 frosted top bar and dock. Keyboard and mouse are decoded from the PS/2 controller.
 
-The whole screen is redrawn every frame, which costs about 30 frames per second at
-1280x720 under emulation. The next real win is damage tracking: most of those pixels do
-not change between frames, and nothing in the compositor knows that yet.
+Frames are driven by a 60 Hz timer, and the numbers below are frames per second alongside
+the share of each frame actually spent working, at 1280x720 under emulation:
+
+| Scene | Before damage tracking | After |
+|:---|:---|:---|
+| Lock screen | 60 fps, 37% busy | 60 fps, 25% busy |
+| Desktop, ball bouncing in a window | 30 fps, 70% busy | 60 fps, 41% busy |
+| Desktop, no windows open | full redraw every frame | 60 fps, 9% busy |
+
+There is still no window resizing, no minimise, and no keyboard event queue: keys are
+decoded as a handful of booleans rather than events, which is the next thing in the way.
 
 ## License
 
