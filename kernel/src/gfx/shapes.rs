@@ -14,33 +14,40 @@ pub fn fill_rect<C: Canvas>(fb: &mut C, x: i32, y: i32, w: i32, h: i32, c: Color
     }
 }
 
-/// How far in from the edge a row of a rounded rect is still inside the corner
-/// arc. Rows between the arcs are straight and can be filled in one run. The
-/// answer is rounded outwards by a pixel so the run it describes is strictly
-/// inside the shape, leaving the boundary column to the antialiased path.
+/// How far in from the edge a row of a rounded rect is fully inside the shape.
+/// Rows between the arcs are straight and can be filled in one run.
+///
+/// The answer is checked against the rasteriser rather than derived from the
+/// circle equation alone. An analytic inset is off by up to a pixel from where
+/// the antialiaser actually reaches full coverage, and filling that pixel
+/// solid is exactly the hard edge the antialiasing exists to avoid.
 pub fn corner_inset(ly: i32, h: i32, r: i32) -> i32 {
     if r <= 0 {
         return 0;
     }
-    let dy = if ly < r {
-        r - ly
+    let cy = if ly < r {
+        r
     } else if ly >= h - r {
-        ly - (h - r - 1)
+        h - r
     } else {
         return 0;
     };
-    if dy >= r {
-        return r;
-    }
+
+    let dy = (ly - cy).abs().max(1) as i64;
+    let rr = r as i64;
+    // Start from the circle equation, then walk out to where coverage is solid.
     let mut inset = 0;
     while inset < r {
-        let dx = r - inset;
-        if dx * dx + dy * dy <= r * r {
+        let dx = rr - inset as i64;
+        if dx * dx + dy * dy <= rr * rr {
             break;
         }
         inset += 1;
     }
-    (inset + 1).min(r)
+    while inset < r && circle_coverage(inset, ly, r, cy, r) != 255 {
+        inset += 1;
+    }
+    inset
 }
 
 pub fn vertical_gradient<C: Canvas>(fb: &mut C, top: Color, mid: Color, bottom: Color) {
@@ -96,8 +103,8 @@ pub fn rounded_coverage(lx: i32, ly: i32, w: i32, h: i32, r: i32) -> u8 {
     let in_y_band = ly >= r && ly < h - r;
     if in_x_band || in_y_band { return 255; }
 
-    let cx = if lx < r { r } else { w - 1 - r };
-    let cy = if ly < r { r } else { h - 1 - r };
+    let cx = if lx < r { r } else { w - r };
+    let cy = if ly < r { r } else { h - r };
     circle_coverage(lx, ly, cx, cy, r)
 }
 
@@ -133,8 +140,8 @@ fn ring_coverage(px: i32, py: i32, cx: i32, cy: i32, inner: i64, outer: i64, inn
     let outer_s = outer_sq * 65536;
     for sy in 0..SAMPLES {
         for sx in 0..SAMPLES {
-            let dx = dx_c * 256 + sx as i64 * STEP as i64 + STEP as i64 / 2 - 128;
-            let dy = dy_c * 256 + sy as i64 * STEP as i64 + STEP as i64 / 2 - 128;
+            let dx = dx_c * 256 + sx as i64 * STEP as i64 + STEP as i64 / 2;
+            let dy = dy_c * 256 + sy as i64 * STEP as i64 + STEP as i64 / 2;
             let d_sq = dx * dx + dy * dy;
             if d_sq >= inner_s && d_sq < outer_s { hit += 1; }
         }
@@ -176,8 +183,8 @@ fn ellipse_coverage(px: i32, py: i32, cx: i32, cy: i32, rx: i64, ry: i64, denom:
     let total = (SAMPLES * SAMPLES) as u32;
     for sy in 0..SAMPLES {
         for sx in 0..SAMPLES {
-            let dx = (px - cx) as i64 * 256 + sx as i64 * STEP as i64 + STEP as i64 / 2 - 128;
-            let dy = (py - cy) as i64 * 256 + sy as i64 * STEP as i64 + STEP as i64 / 2 - 128;
+            let dx = (px - cx) as i64 * 256 + sx as i64 * STEP as i64 + STEP as i64 / 2;
+            let dy = (py - cy) as i64 * 256 + sy as i64 * STEP as i64 + STEP as i64 / 2;
             let lhs = dx * dx * ry * ry + dy * dy * rx * rx;
             let rhs = denom * 256 * 256;
             if lhs < rhs { hit += 1; }
@@ -200,30 +207,47 @@ pub fn fill_circle<C: Canvas>(fb: &mut C, cx: i32, cy: i32, r: i32, c: Color) {
     }
 }
 
+/// How much of pixel (`px`, `py`) a circle of radius `r` centred on (`cx`,
+/// `cy`) covers, from 0 to 255.
+///
+/// The convention for the whole module: a pixel with index n covers the span
+/// `[n, n+1)`, and shape coordinates are the grid between pixels. Sampling a
+/// pixel as if it were centred on its own index instead would put every arc
+/// half a pixel away from the straight edges it has to meet.
 fn circle_coverage(px: i32, py: i32, cx: i32, cy: i32, r: i32) -> u8 {
     const SAMPLES: i32 = 4;
-    const STEP: i32 = 256 / SAMPLES;
+    const STEP: i64 = 256 / SAMPLES as i64;
+    /// Half a pixel diagonal, in 1/256ths: the most a pixel's corner can be
+    /// from its centre, which makes the accept and reject tests exact.
+    const HALF_DIAGONAL: i64 = 181;
+
+    let r256 = r as i64 * 256;
+    // Offset of the pixel's centre from the circle's centre.
+    let dx = (px - cx) as i64 * 256 + 128;
+    let dy = (py - cy) as i64 * 256 + 128;
+    let d2 = dx * dx + dy * dy;
+
+    let outer = r256 + HALF_DIAGONAL;
+    if d2 >= outer * outer {
+        return 0;
+    }
+    let inner = (r256 - HALF_DIAGONAL).max(0);
+    if d2 <= inner * inner {
+        return 255;
+    }
+
+    let r2 = r256 * r256;
     let mut hit = 0u32;
-    let total = (SAMPLES * SAMPLES) as u32;
-    let r2_lo = ((r as i64 - 1) * (r as i64 - 1)).max(0);
-    let r2_hi = ((r as i64 + 1) * (r as i64 + 1)) as i64;
-
-    let dx_c = (px - cx) as i64;
-    let dy_c = (py - cy) as i64;
-    let coarse = dx_c * dx_c + dy_c * dy_c;
-    if coarse >= r2_hi { return 0; }
-    if coarse <= r2_lo { return 255; }
-
-    let r256 = (r as i64) * 256;
-    let r2_256 = r256 * r256;
     for sy in 0..SAMPLES {
+        let y = (py - cy) as i64 * 256 + sy as i64 * STEP + STEP / 2;
         for sx in 0..SAMPLES {
-            let dx = (px - cx) as i64 * 256 + sx as i64 * STEP as i64 + STEP as i64 / 2 - 128;
-            let dy = (py - cy) as i64 * 256 + sy as i64 * STEP as i64 + STEP as i64 / 2 - 128;
-            if dx * dx + dy * dy < r2_256 { hit += 1; }
+            let x = (px - cx) as i64 * 256 + sx as i64 * STEP + STEP / 2;
+            if x * x + y * y < r2 {
+                hit += 1;
+            }
         }
     }
-    ((hit * 255) / total) as u8
+    ((hit * 255) / (SAMPLES * SAMPLES) as u32) as u8
 }
 
 #[allow(dead_code)]
