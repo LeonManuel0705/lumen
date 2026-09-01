@@ -12,8 +12,6 @@ const CONTENT_INSET: i32 = 8;
 const OPEN_SECONDS: f32 = 0.42;
 const CLOSE_SECONDS: f32 = 0.24;
 const CLOSE_DOT: i32 = 11;
-/// How far a window's shadow reaches past its own frame.
-const SHADOW_REACH: i32 = 32;
 /// The lowest a window may sit: clear of the shell's top bar.
 const TOP_BAR_FLOOR: f32 = 86.0;
 
@@ -116,7 +114,7 @@ impl Window {
     /// Everything the window paints, shadow included.
     fn painted(&self) -> Rect {
         let (x, y, w, h) = self.frame_rect();
-        Rect::from_size(x, y, w, h).expand(SHADOW_REACH)
+        Rect::from_size(x, y, w, h).union(&shapes::shadow_bounds(x, y, w, h))
     }
 }
 
@@ -323,15 +321,22 @@ impl WindowManager {
             win.first_frame = false;
             let Some(ink) = ink else { continue };
 
-            // The compositor owns the surface lifecycle: an app always draws
-            // onto a blank one and never has to think about the frame before.
-            win.surface.clear(Color::TRANSPARENT);
-            win.app.draw(&mut win.surface);
-            win.surface.round_corners(CORNER - CONTENT_INSET, false, true);
-
             let (ox, oy) = win.content_origin();
             let changed = ink.union(&win.last_ink).intersect(&full);
             win.last_ink = ink;
+
+            // The compositor owns the surface lifecycle: an app always draws
+            // onto a blank slate and never has to think about the frame before.
+            // The clear ignores the clip on purpose, because it is what makes
+            // the slate; everything after it honours the clip, which matters
+            // most for round_corners, since that multiplies alpha in place and
+            // would fade the corners away if it ran twice over a pixel.
+            win.surface.clear_rect(changed, Color::TRANSPARENT);
+            win.surface.set_clip(changed);
+            win.app.draw(&mut win.surface);
+            win.surface.round_corners(CORNER - CONTENT_INSET, false, true);
+            let whole = win.surface.full_rect();
+            win.surface.set_clip(whole);
             win.content_damage = win
                 .content_damage
                 .union(&changed.translate(ox as i32, oy as i32));
@@ -340,11 +345,20 @@ impl WindowManager {
 
     /// Adds every window's changed region to this frame's damage, and forgets
     /// it: damage describes one frame only.
-    pub fn damage(&mut self, into: &mut Damage) {
+    pub fn damage_into(&mut self, into: &mut Damage) {
         for win in self.windows.iter_mut() {
             if !win.content_damage.is_empty() {
                 into.add(win.content_damage);
             }
+            win.content_damage = Rect::EMPTY;
+            win.moved = false;
+        }
+    }
+
+    /// Drops the accumulated damage without repainting it, for the modes where
+    /// the shell repaints the whole screen anyway.
+    pub fn forget_damage(&mut self) {
+        for win in self.windows.iter_mut() {
             win.content_damage = Rect::EMPTY;
             win.moved = false;
         }

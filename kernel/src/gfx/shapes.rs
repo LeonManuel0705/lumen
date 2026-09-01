@@ -1,5 +1,5 @@
 use super::color;
-use super::{Canvas, Color};
+use super::{Canvas, Color, Rect};
 
 pub fn fill_rect<C: Canvas>(fb: &mut C, x: i32, y: i32, w: i32, h: i32, c: Color) {
     if w <= 0 || h <= 0 { return; }
@@ -275,9 +275,24 @@ pub fn draw_line<C: Canvas>(fb: &mut C, x0: i32, y0: i32, x1: i32, y1: i32, c: C
 /// cover it. The falloff is separable, one weight per column times one per row,
 /// which means the band directly above and below the panel has a single alpha
 /// for the whole run and can be filled without touching pixels one at a time.
+/// How far past its own rectangle a panel's shadow reaches. Damage rectangles
+/// are derived from this rather than from a second copy of the numbers, so a
+/// change to the shadow cannot leave a smear behind it.
+pub fn shadow_bounds(x: i32, y: i32, w: i32, h: i32) -> Rect {
+    Rect::new(
+        x - SHADOW_SPREAD,
+        y + SHADOW_DROP - SHADOW_SPREAD,
+        x + w + SHADOW_SPREAD,
+        y + h + SHADOW_DROP + SHADOW_SPREAD,
+    )
+}
+
+const SHADOW_SPREAD: i32 = 24;
+const SHADOW_DROP: i32 = 8;
+
 pub fn drop_shadow<C: Canvas>(fb: &mut C, x: i32, y: i32, w: i32, h: i32, r: i32) {
-    const SPREAD: i32 = 24;
-    const DROP: i32 = 8;
+    const SPREAD: i32 = SHADOW_SPREAD;
+    const DROP: i32 = SHADOW_DROP;
     const PEAK: u8 = 62;
     if w <= 0 || h <= 0 {
         return;

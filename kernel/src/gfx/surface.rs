@@ -1,13 +1,14 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
-use super::{Canvas, Color};
+use super::{Canvas, Color, Rect};
 
 /// An off-screen RGBA buffer on the heap. Unlike the screen it keeps alpha, so
 /// a window can be drawn once and composited translucent, faded, or scaled.
 pub struct Surface {
     width: usize,
     height: usize,
+    clip: Rect,
     pixels: Vec<Color>,
 }
 
@@ -16,12 +17,26 @@ impl Surface {
         Self {
             width,
             height,
+            clip: Rect::new(0, 0, width as i32, height as i32),
             pixels: vec![Color::TRANSPARENT; width * height],
         }
     }
 
+    pub fn full_rect(&self) -> Rect {
+        Rect::new(0, 0, self.width as i32, self.height as i32)
+    }
+
+    pub fn set_clip(&mut self, rect: Rect) {
+        self.clip = rect.intersect(&self.full_rect());
+    }
+
     /// Fades out the alpha in the corners so window content follows the shape
     /// of the frame it sits in instead of poking out of it.
+    ///
+    /// This multiplies alpha in place, so it must run exactly once over any
+    /// pixel per redraw. It therefore honours the clip: a pixel outside the
+    /// region being redrawn was already rounded when it was last drawn, and
+    /// rounding it again would fade the corners away over a few seconds.
     pub fn round_corners(&mut self, radius: i32, top: bool, bottom: bool) {
         if radius <= 0 {
             return;
@@ -29,13 +44,13 @@ impl Surface {
         let w = self.width as i32;
         let h = self.height as i32;
         let radius = radius.min(w / 2).min(h / 2);
-        for y in 0..h {
+        for y in self.clip.y0.max(0)..self.clip.y1.min(h) {
             let in_top = y < radius;
             let in_bottom = y >= h - radius;
             if !(in_top && top) && !(in_bottom && bottom) {
                 continue;
             }
-            for x in 0..w {
+            for x in self.clip.x0.max(0)..self.clip.x1.min(w) {
                 if x >= radius && x < w - radius {
                     continue;
                 }
@@ -50,10 +65,20 @@ impl Surface {
         }
     }
 
-    /// Hard-overwrites every pixel. Blending would fold this frame into the
-    /// last one, so a surface has to be cleared, not painted over.
-    pub fn clear(&mut self, c: Color) {
-        self.pixels.fill(c);
+    /// Hard-overwrites a region. Blending would fold this frame into the last
+    /// one, so a surface has to be cleared, not painted over. Deliberately
+    /// ignores the clip: this is what makes the clean slate the clip then
+    /// confines the redraw to.
+    pub fn clear_rect(&mut self, rect: Rect, c: Color) {
+        let rect = rect.intersect(&self.full_rect());
+        if rect.is_empty() {
+            return;
+        }
+        for y in rect.y0 as usize..rect.y1 as usize {
+            let start = y * self.width + rect.x0 as usize;
+            let end = y * self.width + rect.x1 as usize;
+            self.pixels[start..end].fill(c);
+        }
     }
 
     #[inline(always)]
@@ -157,18 +182,28 @@ impl Canvas for Surface {
     }
 
     #[inline(always)]
+    fn clip(&self) -> Rect {
+        self.clip
+    }
+
+    #[inline(always)]
     fn put_pixel(&mut self, x: usize, y: usize, c: Color) {
-        if x >= self.width || y >= self.height {
+        if !self.clip.contains(x, y) {
             return;
         }
         self.pixels[y * self.width + x] = c;
     }
 
     fn fill_row(&mut self, x: usize, y: usize, len: usize, c: Color) {
-        if c.a == 0 || y >= self.height || x >= self.width {
+        if c.a == 0 || (y as i32) < self.clip.y0 || y as i32 >= self.clip.y1 {
             return;
         }
-        let n = len.min(self.width - x);
+        let x0 = (x as i32).max(self.clip.x0);
+        let x1 = ((x + len) as i32).min(self.clip.x1);
+        if x1 <= x0 {
+            return;
+        }
+        let (x, n) = (x0 as usize, (x1 - x0) as usize);
         let start = y * self.width + x;
         if c.a == 255 {
             self.pixels[start..start + n].fill(c);
@@ -180,7 +215,7 @@ impl Canvas for Surface {
     }
 
     fn blend_pixel(&mut self, x: usize, y: usize, c: Color) {
-        if c.a == 0 || x >= self.width || y >= self.height {
+        if c.a == 0 || !self.clip.contains(x, y) {
             return;
         }
         let idx = y * self.width + x;

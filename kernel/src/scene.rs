@@ -17,7 +17,8 @@ const FLOOR_FROM_BOTTOM: f32 = 110.0;
 const MAX_RIPPLES: usize = 8;
 const DOCK_ICONS: usize = 6;
 /// Matches the reach of the shadow the shapes module draws.
-const SHADOW_REACH: i32 = 32;
+/// How far the lock screen's entrance lifts its contents.
+const LOCK_RISE: i32 = 26;
 const DOCK_APPS: [Option<AppKind>; DOCK_ICONS] = [
     Some(AppKind::Ball),
     Some(AppKind::Clock),
@@ -68,6 +69,9 @@ pub struct Scene {
     damage: Damage,
     /// Where the cursor was drawn last, so a still cursor costs nothing.
     last_cursor: (i32, i32),
+    /// Set when the date string changes, which is otherwise pixel-identical
+    /// from one frame to the next.
+    date_dirty: bool,
 }
 
 impl Scene {
@@ -99,6 +103,7 @@ impl Scene {
             windows: WindowManager::new(w, h),
             damage: Damage::new(width as i32, height as i32),
             last_cursor: (mid_x as i32, mid_y as i32),
+            date_dirty: true,
         }
     }
 
@@ -127,31 +132,34 @@ impl Scene {
     /// the digit roll needs above and below the baseline.
     fn top_clock_rect(&self) -> Rect {
         let (bx, by, bw, bh) = self.top_bar_rect();
-        let digit_h = self.top_clock.digit_height();
-        let baseline = by + (bh + digit_h) / 2;
-        let half = self.top_clock.width() / 2 + 8;
-        Rect::new(
-            bx + bw / 2 - half,
-            baseline - digit_h - digit_h,
-            bx + bw / 2 + half,
-            baseline + digit_h,
-        )
+        let baseline = by + (bh + self.top_clock.digit_height()) / 2;
+        self.top_clock.changed_rect(bx + bw / 2, baseline)
     }
 
-    /// The band the lock screen's clock, date and hint occupy.
-    fn lock_rects(&self) -> (Rect, Rect) {
+    /// The lock screen's three moving parts. The entrance lifts everything by
+    /// up to LOCK_RISE, so every band has to cover its whole travel or the
+    /// bottom of it smears on the way in.
+    fn lock_rects(&self) -> (Rect, Rect, Rect) {
         let cx = (self.width * 0.5) as i32;
-        let digit_h = self.big_clock.digit_height();
-        let half = self.big_clock.width() / 2 + 12;
         let baseline = (self.height * 0.382) as i32;
-        let clock = Rect::new(
-            cx - half,
-            baseline - digit_h - 32,
-            cx + half,
-            baseline + 84,
+        let clock = self
+            .big_clock
+            .changed_rect(cx, baseline)
+            .union(&self.big_clock.changed_rect(cx, baseline + LOCK_RISE));
+
+        let font = &font_data::FONT_UI;
+        let date_half = self.date_len as i32 * 12 + 24;
+        let date_top = baseline + 66 - font.ascent as i32 - 4;
+        let date = Rect::new(
+            cx - date_half,
+            date_top,
+            cx + date_half,
+            baseline + LOCK_RISE + 66 - font.descent as i32 + 4,
         );
-        let hint = Rect::new(cx - 260, (self.height - 110.0) as i32 - 28, cx + 260, (self.height - 110.0) as i32 + 12);
-        (clock, hint)
+
+        let hint_y = (self.height - 110.0) as i32;
+        let hint = Rect::new(cx - 300, hint_y - 32, cx + 300, hint_y + 16);
+        (clock, date, hint)
     }
 
     pub fn set_clock(&mut self, day_seconds: u32) {
@@ -162,6 +170,9 @@ impl Scene {
 
     pub fn set_date(&mut self, bytes: &[u8]) {
         let n = bytes.len().min(self.date_buf.len());
+        if self.date_len != n || self.date_buf[..n] != bytes[..n] {
+            self.date_dirty = true;
+        }
         self.date_buf[..n].copy_from_slice(&bytes[..n]);
         self.date_len = n;
     }
@@ -301,23 +312,33 @@ impl Scene {
             // slides at once. Not worth being clever about.
             ShellMode::Unlocking => self.damage.mark_all(),
             ShellMode::Locked => {
-                let (clock, hint) = self.lock_rects();
+                let (clock, date, hint) = self.lock_rects();
                 self.damage.add(clock);
+                // The hint breathes every frame; the date only moves while the
+                // lock screen is arriving, or when the day rolls over.
                 self.damage.add(hint);
+                if self.lock_entrance.t() < 1.0 || self.date_dirty {
+                    self.damage.add(date);
+                    self.date_dirty = false;
+                }
             }
             ShellMode::Desktop => {
                 if self.clock_entrance.t() < 1.0 {
                     // The bar is still settling, so all of it moves.
                     let (bx, by, bw, bh) = self.top_bar_rect();
-                    self.damage.add(Rect::from_size(bx, by, bw, bh).expand(SHADOW_REACH));
+                    self.damage
+                        .add(Rect::from_size(bx, by, bw, bh).union(&shapes::shadow_bounds(bx, by, bw, bh)));
                 } else {
                     // Afterwards only the digits roll and the colon breathes.
                     self.damage.add(self.top_clock_rect());
                 }
-                let mut windows = self.damage;
-                self.windows.damage(&mut windows);
-                self.damage = windows;
+                self.windows.damage_into(&mut self.damage);
             }
+        }
+        // Windows keep animating behind the lock screen and while it lifts, so
+        // their damage is collected in every mode, not only on the desktop.
+        if self.mode != ShellMode::Desktop {
+            self.windows.forget_damage();
         }
     }
 
@@ -384,7 +405,10 @@ impl Scene {
 
         let (bx, by, bw, bh) = self.top_bar_rect();
         let bar_lift = ((1.0 - t) * 22.0) as i32;
-        if Rect::from_size(bx, by - bar_lift, bw, bh).expand(SHADOW_REACH).intersects(&clip) {
+        if Rect::from_size(bx, by - bar_lift, bw, bh)
+            .union(&shapes::shadow_bounds(bx, by - bar_lift, bw, bh))
+            .intersects(&clip)
+        {
             shapes::drop_shadow(frame, bx, by - bar_lift, bw, bh, 22);
             frame.glass_fill(bx, by - bar_lift, bw, bh, 22, Color::LUMEN_CARD.with_alpha(130), alpha(255));
             shapes::glass_highlights(frame, bx, by - bar_lift, bw, bh, 22, alpha(255));
@@ -392,7 +416,10 @@ impl Scene {
 
         let (dx, dy, dw, dh) = self.dock_rect();
         let dock_lift = ((1.0 - t) * 40.0) as i32;
-        if !Rect::from_size(dx, dy + dock_lift, dw, dh).expand(SHADOW_REACH).intersects(&clip) {
+        if !Rect::from_size(dx, dy + dock_lift, dw, dh)
+            .union(&shapes::shadow_bounds(dx, dy + dock_lift, dw, dh))
+            .intersects(&clip)
+        {
             return;
         }
         shapes::drop_shadow(frame, dx, dy + dock_lift, dw, dh, 26);
@@ -467,12 +494,20 @@ impl Scene {
             self.draw_top_clock(fb);
         }
 
+        let clip = fb.clip();
         for r in &self.ripples {
             if !r.alive { continue; }
             let t = r.age / RIPPLE_LIFETIME;
             let radius = (16.0 + t * 180.0) as i32;
             let alpha = ((1.0 - t) * (1.0 - t) * 200.0) as u8;
             if alpha < 6 { continue; }
+            // A ripple 400 px across still costs thousands of coverage tests
+            // when it is nowhere near the region being repainted.
+            if !Rect::from_size(r.x as i32 - radius - 4, r.y as i32 - radius - 4, radius * 2 + 8, radius * 2 + 8)
+                .intersects(&clip)
+            {
+                continue;
+            }
             shapes::stroke_circle(fb, r.x as i32, r.y as i32, radius, 3, Color::WHITE.with_alpha(alpha));
             shapes::stroke_circle(fb, r.x as i32, r.y as i32, (radius - 8).max(1), 2, Color::LUMEN_ACCENT.with_alpha(alpha / 2));
         }

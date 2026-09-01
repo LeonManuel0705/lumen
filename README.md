@@ -46,7 +46,8 @@ latency all become kernel concerns.
   the screen again every frame
 * Damage tracking: a frame repaints only the regions that changed, with a clip rectangle
   carried through the drawing primitives so they narrow their loops to it instead of
-  drawing pixels that will be thrown away
+  drawing pixels that will be thrown away, and a self-test that catches a region somebody
+  forgot to claim
 
 **Animation**
 
@@ -121,9 +122,17 @@ the share of each frame actually spent working, at 1280x720 under emulation:
 
 | Scene | Before damage tracking | After |
 |:---|:---|:---|
-| Lock screen | 60 fps, 37% busy | 60 fps, 26% busy |
-| Desktop, ball bouncing in a window | 30 fps, 70% busy | 60 fps, 41% busy |
-| Desktop, no windows open | full redraw every frame | 60 fps, 9% busy |
+| Lock screen | 60 fps, 37% busy | 60 fps, 21% busy |
+| Desktop, ball bouncing in a window | 30 fps, 70% busy | 60 fps, 32% busy |
+| Desktop, no windows open | full redraw every frame | 60 fps, 10% busy |
+
+That middle row is the one that matters: 23 ms of work per frame down to 5 ms, which
+is 4.4 times less, while drawing twice as many frames.
+
+A missed damage region is invisible until somebody happens to look at the right pixel at
+the right moment, so the kernel checks its own work: every two seconds it redraws the
+whole scene into scratch space and compares, and reports the first disagreeing pixel over
+the serial port. Set `VERIFY_EVERY` to 0 in `main.rs` to turn it off.
 
 There is still no window resizing, no minimise, and no keyboard event queue: keys are
 decoded as a handful of booleans rather than events, which is the next thing in the way.

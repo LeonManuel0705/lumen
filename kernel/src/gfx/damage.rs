@@ -86,6 +86,12 @@ impl Damage {
                 }
             }
             self.regions[best] = self.regions[best].union(&candidate);
+            // The region just grew and may now reach a third one.
+            let grown = self.regions[best];
+            self.len -= 1;
+            self.regions[best] = self.regions[self.len];
+            self.add(grown);
+            return;
         }
 
         if self.total_area() * 100 > self.screen.area() * FULL_SCREEN_FRACTION {
