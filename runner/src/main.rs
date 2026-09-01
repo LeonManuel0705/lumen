@@ -18,7 +18,7 @@ fn main() {
             "--target",
             "x86_64-unknown-none",
             "-Z",
-            "build-std=core,compiler_builtins",
+            "build-std=core,compiler_builtins,alloc",
             "-Z",
             "build-std-features=compiler-builtins-mem",
         ])
@@ -52,7 +52,7 @@ fn main() {
         "-drive",
         &format!("format=raw,file={}", bios_image.display()),
         "-m",
-        "256M",
+        "512M",
         "-serial",
         "stdio",
         "-display",

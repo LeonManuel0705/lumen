@@ -2,17 +2,21 @@
 #![no_main]
 #![feature(abi_x86_interrupt)]
 
+extern crate alloc;
+
 mod anim;
 mod arch;
 mod datefmt;
 mod display;
 mod gfx;
 mod input;
+mod mem;
 mod rng;
 mod scene;
 mod serial;
 mod widgets;
 
+use bootloader_api::config::{BootloaderConfig, Mapping};
 use bootloader_api::{entry_point, BootInfo};
 use core::panic::PanicInfo;
 use core::sync::atomic::Ordering;
@@ -21,11 +25,25 @@ use crate::arch::idt::TICKS;
 use crate::input::Snapshot;
 use crate::scene::Scene;
 
-entry_point!(kernel_main);
+static BOOT_CONFIG: BootloaderConfig = {
+    let mut config = BootloaderConfig::new_default();
+    // The heap needs to build page tables, which needs to reach physical
+    // memory through a mapping the bootloader sets up for us.
+    config.mappings.physical_memory = Some(Mapping::Dynamic);
+    config.kernel_stack_size = 256 * 1024;
+    config
+};
+
+entry_point!(kernel_main, config = &BOOT_CONFIG);
 
 fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     serial::init();
     serial_println!("[lumen] serial up");
+
+    match mem::init(boot_info) {
+        Ok(()) => mem::selftest(),
+        Err(err) => panic!("memory init failed: {}", err),
+    }
 
     if let Some(boot_fb) = boot_info.framebuffer.as_mut() {
         let info = boot_fb.info();
