@@ -88,7 +88,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let mut scene = Scene::new(width, height);
     scene.set_clock(day_base);
     scene.set_date(&date_buf[..date_len]);
-    display::cache_background(|fb| scene.draw_background(fb));
+    serial_println!("[lumen] baking wallpaper and glass cache");
+    display::bake_background(|fb| scene.draw_background(fb));
 
     serial_println!("[lumen] entering main loop");
 
@@ -143,10 +144,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             steps -= 1;
         }
         last_seen = now;
-
-        if scene.take_chrome_bake() {
-            display::cache_background(|fb| scene.draw_background(fb));
-        }
 
         display::render(|fb| scene.draw(fb));
 

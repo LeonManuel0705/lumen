@@ -1,6 +1,6 @@
 use crate::anim::easing;
 use crate::gfx::text::{self, Font};
-use crate::gfx::{Color, Framebuffer};
+use crate::gfx::{Canvas, Color};
 
 const ROLL_SECONDS: f32 = 0.28;
 
@@ -67,7 +67,7 @@ impl RollingClock {
         self.font.glyph('0').map(|g| g.h as i32).unwrap_or(20)
     }
 
-    pub fn draw(&self, fb: &mut Framebuffer, center_x: i32, baseline: i32, master: f32, pulse: f32) {
+    pub fn draw<C: Canvas>(&self, fb: &mut C, center_x: i32, baseline: i32, master: f32, pulse: f32) {
         if master <= 0.01 || self.chars[0] == 0 {
             return;
         }
@@ -103,7 +103,7 @@ impl RollingClock {
     }
 }
 
-pub fn glyph_embossed(fb: &mut Framebuffer, font: &Font, c: char, x: i32, baseline: i32, alpha: u8) {
+pub fn glyph_embossed<C: Canvas>(fb: &mut C, font: &Font, c: char, x: i32, baseline: i32, alpha: u8) {
     if alpha < 4 {
         return;
     }
@@ -111,7 +111,7 @@ pub fn glyph_embossed(fb: &mut Framebuffer, font: &Font, c: char, x: i32, baseli
     text::draw_char(fb, font, c, x, baseline, Color::LUMEN_INK.with_alpha(alpha));
 }
 
-pub fn text_embossed(fb: &mut Framebuffer, font: &'static Font, s: &str, center_x: i32, baseline: i32, alpha: u8) {
+pub fn text_embossed<C: Canvas>(fb: &mut C, font: &'static Font, s: &str, center_x: i32, baseline: i32, alpha: u8) {
     if alpha < 4 {
         return;
     }

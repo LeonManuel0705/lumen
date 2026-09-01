@@ -1,6 +1,6 @@
 #![allow(static_mut_refs)]
 
-use super::{Color, Framebuffer};
+use super::{Canvas, Color};
 
 const MAX_LINE: usize = 2048;
 
@@ -8,12 +8,12 @@ static mut SCRATCH_R: [u32; MAX_LINE] = [0; MAX_LINE];
 static mut SCRATCH_G: [u32; MAX_LINE] = [0; MAX_LINE];
 static mut SCRATCH_B: [u32; MAX_LINE] = [0; MAX_LINE];
 
-pub fn box_blur_region(fb: &mut Framebuffer, x: i32, y: i32, w: i32, h: i32, radius: usize, passes: usize) {
+pub fn box_blur_region<C: Canvas>(fb: &mut C, x: i32, y: i32, w: i32, h: i32, radius: usize, passes: usize) {
     if radius == 0 || passes == 0 || w <= 0 || h <= 0 { return; }
     let x_start = x.max(0) as usize;
     let y_start = y.max(0) as usize;
-    let x_end = ((x + w).max(0) as usize).min(fb.width);
-    let y_end = ((y + h).max(0) as usize).min(fb.height);
+    let x_end = ((x + w).max(0) as usize).min(fb.width());
+    let y_end = ((y + h).max(0) as usize).min(fb.height());
     if x_end <= x_start || y_end <= y_start { return; }
 
     let region_w = x_end - x_start;
@@ -33,7 +33,7 @@ pub fn box_blur_region(fb: &mut Framebuffer, x: i32, y: i32, w: i32, h: i32, rad
     }
 }
 
-fn horizontal_pass(fb: &mut Framebuffer, x_start: usize, y: usize, n: usize, radius: usize) {
+fn horizontal_pass<C: Canvas>(fb: &mut C, x_start: usize, y: usize, n: usize, radius: usize) {
     unsafe {
         for i in 0..n {
             let c = fb.read_pixel(x_start + i, y);
@@ -47,7 +47,7 @@ fn horizontal_pass(fb: &mut Framebuffer, x_start: usize, y: usize, n: usize, rad
     }
 }
 
-fn vertical_pass(fb: &mut Framebuffer, x: usize, y_start: usize, n: usize, radius: usize) {
+fn vertical_pass<C: Canvas>(fb: &mut C, x: usize, y_start: usize, n: usize, radius: usize) {
     unsafe {
         for i in 0..n {
             let c = fb.read_pixel(x, y_start + i);

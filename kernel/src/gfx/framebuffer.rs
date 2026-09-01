@@ -1,10 +1,10 @@
 use bootloader_api::info::{FrameBuffer as BootFb, FrameBufferInfo, PixelFormat};
-use super::Color;
+use super::{Canvas, Color};
 
 pub struct Framebuffer<'a> {
     buf: &'a mut [u8],
-    pub width: usize,
-    pub height: usize,
+    width: usize,
+    height: usize,
     stride_bytes: usize,
     bpp: usize,
     format: PixelFormat,
@@ -33,28 +33,6 @@ impl<'a> Framebuffer<'a> {
         }
     }
 
-    #[inline(always)]
-    pub fn put_pixel(&mut self, x: usize, y: usize, c: Color) {
-        if x >= self.width || y >= self.height { return; }
-        let off = y * self.stride_bytes + x * self.bpp;
-        encode(&mut self.buf[off..off + self.bpp], self.format, c);
-    }
-
-    pub fn read_pixel(&self, x: usize, y: usize) -> Color {
-        if x >= self.width || y >= self.height { return Color::rgb(0, 0, 0); }
-        let off = y * self.stride_bytes + x * self.bpp;
-        decode(&self.buf[off..off + self.bpp], self.format)
-    }
-
-    pub fn blend_pixel(&mut self, x: usize, y: usize, c: Color) {
-        if c.a == 0 || x >= self.width || y >= self.height { return; }
-        if c.a == 255 { return self.put_pixel(x, y, c); }
-        let off = y * self.stride_bytes + x * self.bpp;
-        let dst = decode(&self.buf[off..off + self.bpp], self.format);
-        let mixed = c.over(dst);
-        encode(&mut self.buf[off..off + self.bpp], self.format, mixed);
-    }
-
     #[allow(dead_code)]
     pub fn clear(&mut self, c: Color) {
         for y in 0..self.height {
@@ -62,6 +40,40 @@ impl<'a> Framebuffer<'a> {
                 self.put_pixel(x, y, c);
             }
         }
+    }
+}
+
+impl Canvas for Framebuffer<'_> {
+    #[inline(always)]
+    fn width(&self) -> usize {
+        self.width
+    }
+
+    #[inline(always)]
+    fn height(&self) -> usize {
+        self.height
+    }
+
+    #[inline(always)]
+    fn put_pixel(&mut self, x: usize, y: usize, c: Color) {
+        if x >= self.width || y >= self.height { return; }
+        let off = y * self.stride_bytes + x * self.bpp;
+        encode(&mut self.buf[off..off + self.bpp], self.format, c);
+    }
+
+    fn read_pixel(&self, x: usize, y: usize) -> Color {
+        if x >= self.width || y >= self.height { return Color::rgb(0, 0, 0); }
+        let off = y * self.stride_bytes + x * self.bpp;
+        decode(&self.buf[off..off + self.bpp], self.format)
+    }
+
+    fn blend_pixel(&mut self, x: usize, y: usize, c: Color) {
+        if c.a == 0 || x >= self.width || y >= self.height { return; }
+        if c.a == 255 { return self.put_pixel(x, y, c); }
+        let off = y * self.stride_bytes + x * self.bpp;
+        let dst = decode(&self.buf[off..off + self.bpp], self.format);
+        let mixed = c.over(dst);
+        encode(&mut self.buf[off..off + self.bpp], self.format, mixed);
     }
 }
 

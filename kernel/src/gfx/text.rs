@@ -1,4 +1,4 @@
-use super::{Color, Framebuffer};
+use super::{Canvas, Color};
 
 pub struct GlyphMeta {
     pub xmin: i16,
@@ -28,7 +28,7 @@ impl Font {
     }
 }
 
-pub fn draw_char(fb: &mut Framebuffer, font: &Font, c: char, x: i32, baseline_y: i32, color: Color) -> i32 {
+pub fn draw_char<C: Canvas>(fb: &mut C, font: &Font, c: char, x: i32, baseline_y: i32, color: Color) -> i32 {
     let Some(g) = font.glyph(c) else { return 0 };
     if g.w > 0 && g.h > 0 && color.a > 0 {
         let x0 = x + g.xmin as i32;
@@ -55,7 +55,7 @@ pub fn draw_char(fb: &mut Framebuffer, font: &Font, c: char, x: i32, baseline_y:
 }
 
 #[allow(dead_code)]
-pub fn draw_text(fb: &mut Framebuffer, font: &Font, s: &str, x: i32, baseline_y: i32, color: Color) -> i32 {
+pub fn draw_text<C: Canvas>(fb: &mut C, font: &Font, s: &str, x: i32, baseline_y: i32, color: Color) -> i32 {
     let mut pen = x;
     for c in s.chars() {
         pen += draw_char(fb, font, c, pen, baseline_y, color);

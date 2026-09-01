@@ -49,6 +49,8 @@ impl Color {
         }
     }
 
+    /// Source-over onto an opaque destination: the result is opaque, which is
+    /// what the screen wants.
     pub fn over(self, dst: Color) -> Color {
         if self.a == 255 { return self; }
         if self.a == 0   { return dst; }
@@ -62,6 +64,28 @@ impl Color {
             g: blend(self.g, dst.g),
             b: blend(self.b, dst.b),
             a: 255,
+        }
+    }
+
+    #[allow(dead_code)]
+    /// Source-over that keeps the destination's own transparency. Window
+    /// surfaces need this: a translucent panel drawn into an empty surface has
+    /// to stay translucent so the compositor can see through it later.
+    pub fn over_straight(self, dst: Color) -> Color {
+        if self.a == 255 || dst.a == 0 { return self; }
+        if self.a == 0 { return dst; }
+        let sa = self.a as u32;
+        let da = dst.a as u32;
+        let keep = da * (255 - sa);
+        let total = sa * 255 + keep;
+        let mix = |s: u8, d: u8| -> u8 {
+            ((s as u32 * sa * 255 + d as u32 * keep) / total) as u8
+        };
+        Color {
+            r: mix(self.r, dst.r),
+            g: mix(self.g, dst.g),
+            b: mix(self.b, dst.b),
+            a: (total / 255) as u8,
         }
     }
 }
