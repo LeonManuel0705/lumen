@@ -216,7 +216,10 @@ fn encode(slot: &mut [u8], fmt: PixelFormat, c: Color) {
         PixelFormat::U8  => {
             slot[0] = ((c.r as u16 * 30 + c.g as u16 * 59 + c.b as u16 * 11) / 100) as u8;
         }
-        _ => { slot[0] = c.b; slot[1] = c.g; slot[2] = c.r; }
+        // Unknown formats are guessed at as BGR, which is what every device
+        // this kernel has met uses. Never past the end of the slot, though.
+        _ if slot.len() >= 3 => { slot[0] = c.b; slot[1] = c.g; slot[2] = c.r; }
+        _ => {}
     }
 }
 
@@ -226,6 +229,7 @@ fn decode(slot: &[u8], fmt: PixelFormat) -> Color {
         PixelFormat::Rgb => Color::rgb(slot[0], slot[1], slot[2]),
         PixelFormat::Bgr => Color::rgb(slot[2], slot[1], slot[0]),
         PixelFormat::U8  => Color::rgb(slot[0], slot[0], slot[0]),
-        _ => Color::rgb(slot[2], slot[1], slot[0]),
+        _ if slot.len() >= 3 => Color::rgb(slot[2], slot[1], slot[0]),
+        _ => Color::rgb(0, 0, 0),
     }
 }

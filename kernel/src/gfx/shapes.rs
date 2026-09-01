@@ -378,8 +378,8 @@ pub fn stroke_rounded_rect<C: Canvas>(fb: &mut C, x: i32, y: i32, w: i32, h: i32
     if w <= 0 || h <= 0 { return; }
     let r = r.max(0).min(w / 2).min(h / 2);
 
+    let (bx0, by0, bx1, by1) = fb.bounds();
     let edge_pixel = |fb: &mut C, px: i32, py: i32| {
-        let (bx0, by0, bx1, by1) = fb.bounds();
         if px < bx0 || py < by0 || px >= bx1 || py >= by1 {
             return;
         }

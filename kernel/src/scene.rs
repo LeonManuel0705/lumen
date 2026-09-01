@@ -182,6 +182,15 @@ impl Scene {
         (dx + 12 + i as i32 * (size + gap), dy + (dh - size) / 2, size, size)
     }
 
+    /// True when a point is on the shell's own chrome, which sits above every
+    /// window and therefore swallows the press.
+    fn chrome_hit(&self, px: f32, py: f32) -> bool {
+        let inside = |(x, y, w, h): (i32, i32, i32, i32)| {
+            px >= x as f32 && px < (x + w) as f32 && py >= y as f32 && py < (y + h) as f32
+        };
+        inside(self.top_bar_rect()) || inside(self.dock_rect())
+    }
+
     fn dock_hit(&self, px: f32, py: f32) -> Option<AppKind> {
         for i in 0..DOCK_ICONS {
             let (x, y, w, h) = self.dock_icon_rect(i);
@@ -225,6 +234,10 @@ impl Scene {
             if click && self.mode == ShellMode::Desktop {
                 if let Some(kind) = self.dock_hit(cursor.0, cursor.1) {
                     self.windows.open(kind, self.width * 0.32, self.height * 0.3, 0.0);
+                    taken = true;
+                } else if self.chrome_hit(cursor.0, cursor.1) {
+                    // The glass is a surface, not a hole: a press that lands on
+                    // the dock or the top bar stops there.
                     taken = true;
                 }
             }
