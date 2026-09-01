@@ -1,5 +1,6 @@
 use crate::anim::{easing, Spring, Tween};
-use crate::gfx::{font_data, shapes, Color, Framebuffer};
+use crate::display::Frame;
+use crate::gfx::{font_data, shapes, Canvas, Color, Framebuffer};
 use crate::input::Snapshot;
 use crate::widgets::{self, RollingClock};
 
@@ -15,6 +16,15 @@ const FLOOR_FROM_BOTTOM: f32 = 110.0;
 const GRAVITY: f32 = 1800.0;
 const BALL_RADIUS: f32 = 38.0;
 const MAX_RIPPLES: usize = 8;
+const DOCK_ICONS: usize = 6;
+const DOCK_TINTS: [Color; DOCK_ICONS] = [
+    Color::LUMEN_ACCENT,
+    Color::LUMEN_GLOW,
+    Color::rgb(255, 150, 180),
+    Color::rgb(150, 230, 200),
+    Color::rgb(200, 180, 255),
+    Color::LUMEN_INK,
+];
 const RIPPLE_LIFETIME: f32 = 0.95;
 
 #[derive(Copy, Clone)]
@@ -51,7 +61,6 @@ pub struct Scene {
     clock_entrance: Tween,
     lock_entrance: Tween,
     unlock: Tween,
-    chrome_bake: bool,
     date_buf: [u8; 48],
     date_len: usize,
 }
@@ -88,7 +97,6 @@ impl Scene {
             clock_entrance: Tween::new(0.7, 0.35),
             lock_entrance: Tween::new(0.8, 0.3),
             unlock: Tween::new(0.55, 0.0),
-            chrome_bake: false,
             date_buf: [0; 48],
             date_len: 0,
         }
@@ -105,17 +113,10 @@ impl Scene {
         self.date_len = n;
     }
 
-    pub fn take_chrome_bake(&mut self) -> bool {
-        let b = self.chrome_bake;
-        self.chrome_bake = false;
-        b
-    }
-
     fn begin_unlock(&mut self) {
         self.mode = ShellMode::Unlocking;
         self.unlock.restart();
         self.clock_entrance.restart();
-        self.chrome_bake = true;
         self.ball_x = self.width * 0.5;
         self.ball_y = BALL_RADIUS + 10.0;
         self.vx = 220.0;
@@ -266,36 +267,6 @@ impl Scene {
         let floor_y = (self.height - FLOOR_FROM_BOTTOM) as i32;
         shapes::fill_rect(fb, 0, floor_y, w, h - floor_y, Color::rgba(255, 255, 255, 70));
         shapes::fill_rect(fb, 0, floor_y, w, 1, Color::rgba(255, 255, 255, 200));
-
-        if self.mode == ShellMode::Locked {
-            return;
-        }
-
-        let (bx, by, bw, bh) = self.top_bar_rect();
-        crate::gfx::blur::box_blur_region(fb, bx - 8, by - 8, bw + 16, bh + 16, 14, 2);
-        let (dx, dy, dw, dh) = self.dock_rect();
-        crate::gfx::blur::box_blur_region(fb, dx - 8, dy - 8, dw + 16, dh + 16, 14, 2);
-
-        shapes::glass_panel(fb, bx, by, bw, bh, 22, Color::LUMEN_CARD.with_alpha(130));
-        shapes::glass_panel(fb, dx, dy, dw, dh, 26, Color::LUMEN_CARD.with_alpha(130));
-
-        let icon_count = 6;
-        let icon_size = 52;
-        let icon_gap = (dw - icon_size * icon_count - 24) / (icon_count - 1).max(1);
-        let icon_y = dy + (dh - icon_size) / 2;
-        let icon_colors = [
-            Color::LUMEN_ACCENT,
-            Color::LUMEN_GLOW,
-            Color::rgb(255, 150, 180),
-            Color::rgb(150, 230, 200),
-            Color::rgb(200, 180, 255),
-            Color::LUMEN_INK,
-        ];
-        for i in 0..icon_count {
-            let ix = dx + 12 + i * (icon_size + icon_gap);
-            shapes::fill_rounded_rect(fb, ix, icon_y, icon_size, icon_size, 14, icon_colors[i as usize]);
-            shapes::fill_rect(fb, ix + 8, icon_y + icon_size + 4, icon_size - 16, 2, Color::WHITE.with_alpha(120));
-        }
     }
 
     fn top_bar_rect(&self) -> (i32, i32, i32, i32) {
@@ -313,7 +284,55 @@ impl Scene {
         ((w - dock_w) / 2, h - dock_h - 22, dock_w, dock_h)
     }
 
-    fn draw_top_clock(&self, fb: &mut Framebuffer) {
+    /// How far the shell chrome has arrived: 0 while locked, 1 on the desktop.
+    fn chrome_t(&self) -> f32 {
+        match self.mode {
+            ShellMode::Locked => 0.0,
+            ShellMode::Unlocking => easing::ease_out_quad(self.unlock.t()),
+            ShellMode::Desktop => 1.0,
+        }
+    }
+
+    fn draw_chrome(&self, frame: &mut Frame) {
+        let t = self.chrome_t();
+        if t <= 0.01 {
+            return;
+        }
+        let alpha = |a: u8| (a as f32 * t) as u8;
+
+        let (bx, by, bw, bh) = self.top_bar_rect();
+        let bar_lift = ((1.0 - t) * 22.0) as i32;
+        shapes::drop_shadow(frame, bx, by - bar_lift, bw, bh, 22);
+        frame.glass_backdrop(bx, by - bar_lift, bw, bh, 22);
+        shapes::glass_panel(frame, bx, by - bar_lift, bw, bh, 22, Color::LUMEN_CARD.with_alpha(alpha(130)));
+
+        let (dx, dy, dw, dh) = self.dock_rect();
+        let dock_lift = ((1.0 - t) * 40.0) as i32;
+        shapes::drop_shadow(frame, dx, dy + dock_lift, dw, dh, 26);
+        frame.glass_backdrop(dx, dy + dock_lift, dw, dh, 26);
+        shapes::glass_panel(frame, dx, dy + dock_lift, dw, dh, 26, Color::LUMEN_CARD.with_alpha(alpha(130)));
+
+        let icon_size = 52;
+        let icon_gap = (dw - icon_size * DOCK_ICONS as i32 - 24) / (DOCK_ICONS as i32 - 1).max(1);
+        let icon_y = dy + dock_lift + (dh - icon_size) / 2;
+        for (i, tint) in DOCK_TINTS.iter().enumerate() {
+            // Each icon lands a beat after the one before it.
+            let start = 0.20 + i as f32 * 0.07;
+            let local = ((t - start) / 0.45).clamp(0.0, 1.0);
+            if local <= 0.0 {
+                continue;
+            }
+            let pop = easing::ease_out_back(local);
+            let size = (icon_size as f32 * (0.55 + 0.45 * pop)) as i32;
+            let ix = dx + 12 + i as i32 * (icon_size + icon_gap) + (icon_size - size) / 2;
+            let iy = icon_y + (icon_size - size) / 2;
+            let a = (local * 255.0) as u8;
+            shapes::fill_rounded_rect(frame, ix, iy, size, size, size * 27 / 100, tint.with_alpha(a));
+            shapes::fill_rect(frame, ix + 8, icon_y + icon_size + 4, size - 16, 2, Color::WHITE.with_alpha(a / 2));
+        }
+    }
+
+    fn draw_top_clock<C: Canvas>(&self, fb: &mut C) {
         let t_in = self.clock_entrance.t();
         if t_in <= 0.0 {
             return;
@@ -326,7 +345,7 @@ impl Scene {
         self.top_clock.draw(fb, bx + bw / 2, baseline, master, pulse);
     }
 
-    fn draw_lock(&self, fb: &mut Framebuffer) {
+    fn draw_lock<C: Canvas>(&self, fb: &mut C) {
         let t_in = self.lock_entrance.t();
         let t_out = self.unlock.t();
         let master = easing::ease_out_quad(t_in) * (1.0 - t_out);
@@ -352,9 +371,13 @@ impl Scene {
         widgets::text_embossed(fb, &font_data::FONT_UI, "Leertaste oder Klick zum Entsperren", cx, hint_y, hint_alpha as u8);
     }
 
-    pub fn draw(&self, fb: &mut Framebuffer) {
+    pub fn draw(&self, fb: &mut Frame) {
         if self.mode != ShellMode::Locked {
             self.draw_desktop(fb);
+        }
+        self.draw_chrome(fb);
+        if self.mode != ShellMode::Locked {
+            self.draw_top_clock(fb);
         }
 
         for r in &self.ripples {
@@ -379,7 +402,7 @@ impl Scene {
         shapes::fill_circle(fb, cx, cy, 3,  Color::WHITE);
     }
 
-    fn draw_desktop(&self, fb: &mut Framebuffer) {
+    fn draw_desktop<C: Canvas>(&self, fb: &mut C) {
         let floor_y = (self.height - FLOOR_FROM_BOTTOM) as i32;
 
         for i in 0..TRAIL_LEN {
@@ -439,6 +462,5 @@ impl Scene {
             Color::rgba(255, 255, 255, 200),
         );
 
-        self.draw_top_clock(fb);
     }
 }

@@ -1,41 +1,40 @@
-use super::{Color, Framebuffer};
+use super::{Canvas, Color};
 
-pub fn fill_rect(fb: &mut Framebuffer, x: i32, y: i32, w: i32, h: i32, c: Color) {
+pub fn fill_rect<C: Canvas>(fb: &mut C, x: i32, y: i32, w: i32, h: i32, c: Color) {
     if w <= 0 || h <= 0 { return; }
     let x0 = x.max(0) as usize;
     let y0 = y.max(0) as usize;
-    let x1 = ((x + w).max(0) as usize).min(fb.width);
-    let y1 = ((y + h).max(0) as usize).min(fb.height);
+    let x1 = ((x + w).max(0) as usize).min(fb.width());
+    let y1 = ((y + h).max(0) as usize).min(fb.height());
     for py in y0..y1 {
         for px in x0..x1 {
-            if c.a == 255 { fb.put_pixel(px, py, c); }
-            else { fb.blend_pixel(px, py, c); }
+            fb.paint(px, py, c);
         }
     }
 }
 
-pub fn vertical_gradient(fb: &mut Framebuffer, top: Color, mid: Color, bottom: Color) {
-    let h = fb.height.max(1);
-    for y in 0..fb.height {
+pub fn vertical_gradient<C: Canvas>(fb: &mut C, top: Color, mid: Color, bottom: Color) {
+    let h = fb.height().max(1);
+    for y in 0..fb.height() {
         let p = (y * 510) / h;
         let row = if p <= 255 {
             Color::lerp(top, mid, p as u8)
         } else {
             Color::lerp(mid, bottom, (p - 255) as u8)
         };
-        for x in 0..fb.width {
+        for x in 0..fb.width() {
             fb.put_pixel(x, y, row);
         }
     }
 }
 
-pub fn fill_rounded_rect(fb: &mut Framebuffer, x: i32, y: i32, w: i32, h: i32, r: i32, c: Color) {
+pub fn fill_rounded_rect<C: Canvas>(fb: &mut C, x: i32, y: i32, w: i32, h: i32, r: i32, c: Color) {
     if w <= 0 || h <= 0 { return; }
     let r = r.max(0).min(w / 2).min(h / 2);
     let x0 = x.max(0) as i32;
     let y0 = y.max(0) as i32;
-    let x1 = (x + w).min(fb.width as i32);
-    let y1 = (y + h).min(fb.height as i32);
+    let x1 = (x + w).min(fb.width() as i32);
+    let y1 = (y + h).min(fb.height() as i32);
 
     for py in y0..y1 {
         for px in x0..x1 {
@@ -47,7 +46,7 @@ pub fn fill_rounded_rect(fb: &mut Framebuffer, x: i32, y: i32, w: i32, h: i32, r
     }
 }
 
-fn rounded_coverage(lx: i32, ly: i32, w: i32, h: i32, r: i32) -> u8 {
+pub fn rounded_coverage(lx: i32, ly: i32, w: i32, h: i32, r: i32) -> u8 {
     let in_x_band = lx >= r && lx < w - r;
     let in_y_band = ly >= r && ly < h - r;
     if in_x_band || in_y_band { return 255; }
@@ -57,15 +56,15 @@ fn rounded_coverage(lx: i32, ly: i32, w: i32, h: i32, r: i32) -> u8 {
     circle_coverage(lx, ly, cx, cy, r)
 }
 
-pub fn stroke_circle(fb: &mut Framebuffer, cx: i32, cy: i32, r: i32, thickness: i32, c: Color) {
+pub fn stroke_circle<C: Canvas>(fb: &mut C, cx: i32, cy: i32, r: i32, thickness: i32, c: Color) {
     if r <= 0 || thickness <= 0 { return; }
     let inner = (r - thickness / 2).max(0) as i64;
     let outer = (r + (thickness + 1) / 2) as i64;
     let inner_sq = inner * inner;
     let outer_sq = outer * outer;
     let outer_i = outer as i32;
-    for py in (cy - outer_i - 1).max(0)..(cy + outer_i + 1).min(fb.height as i32) {
-        for px in (cx - outer_i - 1).max(0)..(cx + outer_i + 1).min(fb.width as i32) {
+    for py in (cy - outer_i - 1).max(0)..(cy + outer_i + 1).min(fb.height() as i32) {
+        for px in (cx - outer_i - 1).max(0)..(cx + outer_i + 1).min(fb.width() as i32) {
             let cov = ring_coverage(px, py, cx, cy, inner, outer, inner_sq, outer_sq);
             if cov == 0 { continue; }
             let pixel = if cov == 255 { c } else { c.with_alpha(((c.a as u16 * cov as u16) / 255) as u8) };
@@ -97,13 +96,13 @@ fn ring_coverage(px: i32, py: i32, cx: i32, cy: i32, inner: i64, outer: i64, inn
     ((hit * 255) / (SAMPLES * SAMPLES) as u32) as u8
 }
 
-pub fn fill_ellipse(fb: &mut Framebuffer, cx: i32, cy: i32, rx: i32, ry: i32, c: Color) {
+pub fn fill_ellipse<C: Canvas>(fb: &mut C, cx: i32, cy: i32, rx: i32, ry: i32, c: Color) {
     if rx <= 0 || ry <= 0 { return; }
     let rx2 = rx as i64;
     let ry2 = ry as i64;
     let denom = rx2 * rx2 * ry2 * ry2;
-    for py in (cy - ry - 1).max(0)..(cy + ry + 1).min(fb.height as i32) {
-        for px in (cx - rx - 1).max(0)..(cx + rx + 1).min(fb.width as i32) {
+    for py in (cy - ry - 1).max(0)..(cy + ry + 1).min(fb.height() as i32) {
+        for px in (cx - rx - 1).max(0)..(cx + rx + 1).min(fb.width() as i32) {
             let cov = ellipse_coverage(px, py, cx, cy, rx as i64, ry as i64, denom);
             if cov == 0 { continue; }
             let pixel = if cov == 255 { c } else { c.with_alpha(((c.a as u16 * cov as u16) / 255) as u8) };
@@ -140,11 +139,11 @@ fn ellipse_coverage(px: i32, py: i32, cx: i32, cy: i32, rx: i64, ry: i64, denom:
     ((hit * 255) / total) as u8
 }
 
-pub fn fill_circle(fb: &mut Framebuffer, cx: i32, cy: i32, r: i32, c: Color) {
+pub fn fill_circle<C: Canvas>(fb: &mut C, cx: i32, cy: i32, r: i32, c: Color) {
     if r <= 0 { return; }
     let r2 = r + 1;
-    for py in (cy - r2).max(0)..(cy + r2).min(fb.height as i32) {
-        for px in (cx - r2).max(0)..(cx + r2).min(fb.width as i32) {
+    for py in (cy - r2).max(0)..(cy + r2).min(fb.height() as i32) {
+        for px in (cx - r2).max(0)..(cx + r2).min(fb.width() as i32) {
             let cov = circle_coverage(px, py, cx, cy, r);
             if cov == 0 { continue; }
             let pixel = if cov == 255 { c } else { c.with_alpha(((c.a as u16 * cov as u16) / 255) as u8) };
@@ -180,7 +179,7 @@ fn circle_coverage(px: i32, py: i32, cx: i32, cy: i32, r: i32) -> u8 {
 }
 
 #[allow(dead_code)]
-pub fn draw_line(fb: &mut Framebuffer, x0: i32, y0: i32, x1: i32, y1: i32, c: Color) {
+pub fn draw_line<C: Canvas>(fb: &mut C, x0: i32, y0: i32, x1: i32, y1: i32, c: Color) {
     let dx = (x1 - x0).abs();
     let dy = -(y1 - y0).abs();
     let sx = if x0 < x1 { 1 } else { -1 };
@@ -189,9 +188,8 @@ pub fn draw_line(fb: &mut Framebuffer, x0: i32, y0: i32, x1: i32, y1: i32, c: Co
     let mut x = x0;
     let mut y = y0;
     loop {
-        if x >= 0 && y >= 0 && (x as usize) < fb.width && (y as usize) < fb.height {
-            if c.a == 255 { fb.put_pixel(x as usize, y as usize, c); }
-            else { fb.blend_pixel(x as usize, y as usize, c); }
+        if x >= 0 && y >= 0 && (x as usize) < fb.width() && (y as usize) < fb.height() {
+            fb.paint(x as usize, y as usize, c);
         }
         if x == x1 && y == y1 { break; }
         let e2 = 2 * err;
@@ -200,24 +198,35 @@ pub fn draw_line(fb: &mut Framebuffer, x0: i32, y0: i32, x1: i32, y1: i32, c: Co
     }
 }
 
-pub fn drop_shadow_stub(fb: &mut Framebuffer, x: i32, y: i32, w: i32, h: i32, r: i32) {
-    let layers = [
-        (14, Color::rgba(20, 40, 80, 14)),
-        (9,  Color::rgba(20, 40, 80, 22)),
-        (5,  Color::rgba(20, 40, 80, 32)),
-        (2,  Color::rgba(20, 40, 80, 40)),
+/// Stacked concentric rounded rects, each a little larger and fainter than the
+/// last. Cheaper than blurring a mask and, at these radii, indistinguishable.
+pub fn drop_shadow<C: Canvas>(fb: &mut C, x: i32, y: i32, w: i32, h: i32, r: i32) {
+    const LAYERS: [(i32, i32, u8); 5] = [
+        (18, 11, 7),
+        (13, 9, 9),
+        (9, 7, 11),
+        (5, 5, 13),
+        (2, 3, 15),
     ];
-    for (offset, color) in layers {
-        fill_rounded_rect(fb, x - offset, y - offset + offset * 2, w + offset * 2, h + offset * 2, r + offset, color);
+    for (spread, drop, alpha) in LAYERS {
+        fill_rounded_rect(
+            fb,
+            x - spread,
+            y - spread + drop,
+            w + spread * 2,
+            h + spread * 2,
+            r + spread,
+            Color::rgba(30, 60, 100, alpha),
+        );
     }
 }
 
-pub fn radial_glow(fb: &mut Framebuffer, cx: i32, cy: i32, r: i32, inner: Color, outer_alpha: u8) {
+pub fn radial_glow<C: Canvas>(fb: &mut C, cx: i32, cy: i32, r: i32, inner: Color, outer_alpha: u8) {
     if r <= 0 { return; }
     let r64 = r as i64;
     let r_sq = r64 * r64;
-    for py in (cy - r).max(0)..(cy + r).min(fb.height as i32) {
-        for px in (cx - r).max(0)..(cx + r).min(fb.width as i32) {
+    for py in (cy - r).max(0)..(cy + r).min(fb.height() as i32) {
+        for px in (cx - r).max(0)..(cx + r).min(fb.width() as i32) {
             let dx = (px - cx) as i64;
             let dy = (py - cy) as i64;
             let d_sq = dx * dx + dy * dy;
@@ -229,7 +238,7 @@ pub fn radial_glow(fb: &mut Framebuffer, cx: i32, cy: i32, r: i32, inner: Color,
     }
 }
 
-pub fn cloud(fb: &mut Framebuffer, cx: i32, cy: i32, scale: i32, color: Color) {
+pub fn cloud<C: Canvas>(fb: &mut C, cx: i32, cy: i32, scale: i32, color: Color) {
     let bumps = [
         ( 0,  0, 16, 255),
         (-12, 2, 12, 240),
@@ -246,8 +255,10 @@ pub fn cloud(fb: &mut Framebuffer, cx: i32, cy: i32, scale: i32, color: Color) {
     }
 }
 
-pub fn glass_panel(fb: &mut Framebuffer, x: i32, y: i32, w: i32, h: i32, r: i32, fill: Color) {
-    drop_shadow_stub(fb, x, y, w, h, r);
+/// The tint, rim light and border of a frosted panel. The blurred backdrop
+/// underneath comes from the frame's glass cache and the shadow from
+/// `drop_shadow`, so this layer can go on top of anything.
+pub fn glass_panel<C: Canvas>(fb: &mut C, x: i32, y: i32, w: i32, h: i32, r: i32, fill: Color) {
     fill_rounded_rect(fb, x, y, w, h, r, fill);
 
     let inset = r.max(2);
@@ -260,13 +271,13 @@ pub fn glass_panel(fb: &mut Framebuffer, x: i32, y: i32, w: i32, h: i32, r: i32,
     stroke_rounded_rect(fb, x, y, w, h, r, Color::rgba(255, 255, 255, 70));
 }
 
-pub fn stroke_rounded_rect(fb: &mut Framebuffer, x: i32, y: i32, w: i32, h: i32, r: i32, c: Color) {
+pub fn stroke_rounded_rect<C: Canvas>(fb: &mut C, x: i32, y: i32, w: i32, h: i32, r: i32, c: Color) {
     if w <= 0 || h <= 0 { return; }
     let r = r.max(0).min(w / 2).min(h / 2);
     let x0 = x.max(0) as i32;
     let y0 = y.max(0) as i32;
-    let x1 = (x + w).min(fb.width as i32);
-    let y1 = (y + h).min(fb.height as i32);
+    let x1 = (x + w).min(fb.width() as i32);
+    let y1 = (y + h).min(fb.height() as i32);
 
     for py in y0..y1 {
         for px in x0..x1 {
