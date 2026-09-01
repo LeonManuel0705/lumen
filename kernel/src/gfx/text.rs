@@ -33,8 +33,17 @@ pub fn draw_char<C: Canvas>(fb: &mut C, font: &Font, c: char, x: i32, baseline_y
     if g.w > 0 && g.h > 0 && color.a > 0 {
         let x0 = x + g.xmin as i32;
         let y0 = baseline_y - g.ymin as i32 - g.h as i32;
-        let mut i = g.offset as usize;
+        let (cx0, cy0, cx1, cy1) = fb.bounds();
+        // Skip whole glyph rows outside the clip rather than testing per pixel.
+        if x0 >= cx1 || y0 >= cy1 || x0 + g.w as i32 <= cx0 || y0 + g.h as i32 <= cy0 {
+            return g.advance as i32;
+        }
         for row in 0..g.h as i32 {
+            let py = y0 + row;
+            if py < cy0 || py >= cy1 {
+                continue;
+            }
+            let mut i = g.offset as usize + (row * g.w as i32) as usize;
             for col in 0..g.w as i32 {
                 let cov = font.bitmap[i];
                 i += 1;
@@ -42,12 +51,10 @@ pub fn draw_char<C: Canvas>(fb: &mut C, font: &Font, c: char, x: i32, baseline_y
                     continue;
                 }
                 let px = x0 + col;
-                let py = y0 + row;
-                if px < 0 || py < 0 {
+                if px < cx0 || px >= cx1 {
                     continue;
                 }
-                let a = ((color.a as u32 * cov as u32) / 255) as u8;
-                fb.blend_pixel(px as usize, py as usize, color.with_alpha(a));
+                fb.blend_pixel(px as usize, py as usize, color.fade(cov));
             }
         }
     }

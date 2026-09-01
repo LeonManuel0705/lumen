@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 use crate::anim::{easing, Spring, Tween};
 use crate::apps::{App, AppInput, AppKind};
 use crate::display::Frame;
-use crate::gfx::{font_data, shapes, text, Canvas, Color, Surface};
+use crate::gfx::{font_data, shapes, text, Canvas, Color, Damage, Rect, Surface};
 
 const TITLE_BAR: i32 = 38;
 const CORNER: i32 = 20;
@@ -12,6 +12,8 @@ const CONTENT_INSET: i32 = 8;
 const OPEN_SECONDS: f32 = 0.42;
 const CLOSE_SECONDS: f32 = 0.24;
 const CLOSE_DOT: i32 = 11;
+/// How far a window's shadow reaches past its own frame.
+const SHADOW_REACH: i32 = 32;
 
 pub struct Window {
     id: u32,
@@ -26,6 +28,17 @@ pub struct Window {
     closing: Option<Tween>,
     /// 0 at rest, 1 while the window is being carried around.
     lift: Spring,
+    /// Set for any frame where the window's whole presentation changes: it is
+    /// growing, shrinking, moving, or has just gained or lost focus.
+    moved: bool,
+    /// Where the app said its content changed, in screen coordinates.
+    content_damage: Rect,
+    /// Where the app painted the last time its surface was drawn, in surface
+    /// coordinates. The app describes only the present; remembering the past is
+    /// the compositor's job.
+    last_ink: Rect,
+    was_focused: bool,
+    first_frame: bool,
 }
 
 impl Window {
@@ -86,6 +99,12 @@ impl Window {
             self.y + TITLE_BAR as f32,
         )
     }
+
+    /// Everything the window paints, shadow included.
+    fn painted(&self) -> Rect {
+        let (x, y, w, h) = self.frame_rect();
+        Rect::from_size(x, y, w, h).expand(SHADOW_REACH)
+    }
 }
 
 pub struct WindowManager {
@@ -139,6 +158,11 @@ impl WindowManager {
             open: Tween::new(OPEN_SECONDS, delay),
             closing: None,
             lift: Spring::new(0.0, 190.0, 22.0),
+            moved: true,
+            content_damage: Rect::EMPTY,
+            last_ink: Rect::EMPTY,
+            was_focused: false,
+            first_frame: true,
         });
         crate::serial_println!("[wm] window {} opened ({}x{})", id, width, height);
     }
@@ -206,14 +230,30 @@ impl WindowManager {
 
         for win in self.windows.iter_mut() {
             let focused = Some(win.id) == focused_id;
+            let before = win.painted();
+            let open_before = win.open.t();
+
             win.lift
                 .set_target(if Some(win.id) == dragging_id { 1.0 } else { 0.0 });
             win.lift.step(dt);
             win.open.step(dt);
             if let Some(close) = win.closing.as_mut() {
                 close.step(dt);
+                win.moved = true;
+                win.content_damage = win.content_damage.union(&before).union(&win.painted());
                 continue;
             }
+
+            // Anything that changes the window as a whole: the entrance still
+            // running, a drag, the settling lift, or the focus tint flipping.
+            win.moved = win.moved
+                || win.first_frame
+                || focused != win.was_focused
+                || open_before < 1.0
+                || Some(win.id) == dragging_id
+                || !win.lift.is_settled(0.001)
+                || before != win.painted();
+            win.was_focused = focused;
 
             let (ox, oy) = win.content_origin();
             let local = (cursor.0 - ox, cursor.1 - oy);
@@ -229,11 +269,9 @@ impl WindowManager {
                 reset,
             };
             win.app.update(dt, &input);
-            // The compositor owns the surface lifecycle: an app always draws
-            // onto a blank one and never has to think about the frame before.
-            win.surface.clear(Color::TRANSPARENT);
-            win.app.draw(&mut win.surface);
-            win.surface.round_corners(CORNER - CONTENT_INSET, false, true);
+            if win.moved {
+                win.content_damage = win.content_damage.union(&before).union(&win.painted());
+            }
         }
 
         self.windows
@@ -241,9 +279,59 @@ impl WindowManager {
         consumed
     }
 
+    /// Redraws the surface of every window whose app painted something new.
+    /// This runs once per frame, after the last simulation substep: physics may
+    /// need several steps to stay stable, but only the final state is ever seen.
+    pub fn render_surfaces(&mut self) {
+        for win in self.windows.iter_mut() {
+            if win.closing.is_some() {
+                continue;
+            }
+            let full = Rect::from_size(
+                0,
+                0,
+                win.surface.width() as i32,
+                win.surface.height() as i32,
+            );
+            let ink = if win.first_frame { Some(full) } else { win.app.painted() };
+            win.first_frame = false;
+            let Some(ink) = ink else { continue };
+
+            // The compositor owns the surface lifecycle: an app always draws
+            // onto a blank one and never has to think about the frame before.
+            win.surface.clear(Color::TRANSPARENT);
+            win.app.draw(&mut win.surface);
+            win.surface.round_corners(CORNER - CONTENT_INSET, false, true);
+
+            let (ox, oy) = win.content_origin();
+            let changed = ink.union(&win.last_ink).intersect(&full);
+            win.last_ink = ink;
+            win.content_damage = win
+                .content_damage
+                .union(&changed.translate(ox as i32, oy as i32));
+        }
+    }
+
+    /// Adds every window's changed region to this frame's damage, and forgets
+    /// it: damage describes one frame only.
+    pub fn damage(&mut self, into: &mut Damage) {
+        for win in self.windows.iter_mut() {
+            if !win.content_damage.is_empty() {
+                into.add(win.content_damage);
+            }
+            win.content_damage = Rect::EMPTY;
+            win.moved = false;
+        }
+    }
+
     pub fn draw(&self, frame: &mut Frame) {
+        let clip = frame.clip();
         let focused_id = self.windows.last().map(|w| w.id);
         for win in &self.windows {
+            // Nothing of this window lands in the region being repainted.
+            if !win.painted().intersects(&clip) {
+                continue;
+            }
             self.draw_window(frame, win, Some(win.id) == focused_id);
         }
     }
@@ -261,7 +349,7 @@ impl WindowManager {
         shapes::drop_shadow(frame, x, y, w, h, radius);
 
         let tint = if focused { 112 } else { 92 };
-        frame.glass_fill(x, y, w, h, radius, Color::LUMEN_CARD.with_alpha(fade(tint)));
+        frame.glass_fill(x, y, w, h, radius, Color::LUMEN_CARD.with_alpha(tint), opacity);
         shapes::glass_highlights(frame, x, y, w, h, radius, fade(255));
 
         // Title bar: a hairline under it, the close dot, and the app's name.

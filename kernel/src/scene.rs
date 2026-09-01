@@ -1,7 +1,7 @@
 use crate::anim::{easing, Spring, Tween};
 use crate::apps::AppKind;
 use crate::display::Frame;
-use crate::gfx::{font_data, shapes, Canvas, Color, Framebuffer};
+use crate::gfx::{font_data, shapes, Canvas, Color, Damage, Framebuffer, Rect};
 use crate::input::Snapshot;
 use crate::widgets::{self, RollingClock};
 use crate::wm::WindowManager;
@@ -16,6 +16,8 @@ enum ShellMode {
 const FLOOR_FROM_BOTTOM: f32 = 110.0;
 const MAX_RIPPLES: usize = 8;
 const DOCK_ICONS: usize = 6;
+/// Matches the reach of the shadow the shapes module draws.
+const SHADOW_REACH: i32 = 32;
 const DOCK_APPS: [Option<AppKind>; DOCK_ICONS] = [
     Some(AppKind::Ball),
     Some(AppKind::Clock),
@@ -63,6 +65,9 @@ pub struct Scene {
     date_buf: [u8; 48],
     date_len: usize,
     windows: WindowManager,
+    damage: Damage,
+    /// Where the cursor was drawn last, so a still cursor costs nothing.
+    last_cursor: (i32, i32),
 }
 
 impl Scene {
@@ -92,7 +97,61 @@ impl Scene {
             date_buf: [0; 48],
             date_len: 0,
             windows: WindowManager::new(w, h),
+            damage: Damage::new(width as i32, height as i32),
+            last_cursor: (mid_x as i32, mid_y as i32),
         }
+    }
+
+    /// Closes out a frame: draws the app surfaces once, works out what changed,
+    /// and hands the regions over. Simulation may have stepped several times to
+    /// get here, but only the state it ended on is ever drawn.
+    pub fn finish_frame(&mut self) -> Damage {
+        if self.mode != ShellMode::Locked {
+            self.windows.render_surfaces();
+        }
+        self.collect_damage();
+        let out = self.damage;
+        self.damage.clear();
+        out
+    }
+
+    pub fn repaint_everything(&mut self) {
+        self.damage.mark_all();
+    }
+
+    fn cursor_rect_at(at: (i32, i32)) -> Rect {
+        Rect::from_size(at.0 - 24, at.1 - 24, 48, 48)
+    }
+
+    /// The pixels the top bar's clock can occupy, including the vertical room
+    /// the digit roll needs above and below the baseline.
+    fn top_clock_rect(&self) -> Rect {
+        let (bx, by, bw, bh) = self.top_bar_rect();
+        let digit_h = self.top_clock.digit_height();
+        let baseline = by + (bh + digit_h) / 2;
+        let half = self.top_clock.width() / 2 + 8;
+        Rect::new(
+            bx + bw / 2 - half,
+            baseline - digit_h - digit_h,
+            bx + bw / 2 + half,
+            baseline + digit_h,
+        )
+    }
+
+    /// The band the lock screen's clock, date and hint occupy.
+    fn lock_rects(&self) -> (Rect, Rect) {
+        let cx = (self.width * 0.5) as i32;
+        let digit_h = self.big_clock.digit_height();
+        let half = self.big_clock.width() / 2 + 12;
+        let baseline = (self.height * 0.382) as i32;
+        let clock = Rect::new(
+            cx - half,
+            baseline - digit_h - 32,
+            cx + half,
+            baseline + 84,
+        );
+        let hint = Rect::new(cx - 260, (self.height - 110.0) as i32 - 28, cx + 260, (self.height - 110.0) as i32 + 12);
+        (clock, hint)
     }
 
     pub fn set_clock(&mut self, day_seconds: u32) {
@@ -199,6 +258,56 @@ impl Scene {
         }
     }
 
+    fn collect_damage(&mut self) {
+        // A cursor that has not moved is already on screen where it belongs.
+        // One that has must claim where it was as well as where it is: anything
+        // that can stay still for a frame has to carry its own history, because
+        // the frame-to-frame union only covers what was repainted last frame.
+        let now = (self.cursor_x.current as i32, self.cursor_y.current as i32);
+        if now != self.last_cursor {
+            self.damage.add(Self::cursor_rect_at(self.last_cursor));
+            self.damage.add(Self::cursor_rect_at(now));
+            self.last_cursor = now;
+        }
+
+        for r in &self.ripples {
+            if !r.alive {
+                continue;
+            }
+            let radius = (16.0 + (r.age / RIPPLE_LIFETIME) * 180.0) as i32 + 6;
+            self.damage.add(Rect::from_size(
+                r.x as i32 - radius,
+                r.y as i32 - radius,
+                radius * 2,
+                radius * 2,
+            ));
+        }
+
+        match self.mode {
+            // Everything is in motion during the unlock, and the whole lock UI
+            // slides at once. Not worth being clever about.
+            ShellMode::Unlocking => self.damage.mark_all(),
+            ShellMode::Locked => {
+                let (clock, hint) = self.lock_rects();
+                self.damage.add(clock);
+                self.damage.add(hint);
+            }
+            ShellMode::Desktop => {
+                if self.clock_entrance.t() < 1.0 {
+                    // The bar is still settling, so all of it moves.
+                    let (bx, by, bw, bh) = self.top_bar_rect();
+                    self.damage.add(Rect::from_size(bx, by, bw, bh).expand(SHADOW_REACH));
+                } else {
+                    // Afterwards only the digits roll and the colon breathes.
+                    self.damage.add(self.top_clock_rect());
+                }
+                let mut windows = self.damage;
+                self.windows.damage(&mut windows);
+                self.damage = windows;
+            }
+        }
+    }
+
     fn spawn_ripple(&mut self, x: f32, y: f32) {
         self.ripples[self.next_ripple] = Ripple { x, y, age: 0.0, alive: true };
         self.next_ripple = (self.next_ripple + 1) % MAX_RIPPLES;
@@ -258,17 +367,23 @@ impl Scene {
             return;
         }
         let alpha = |a: u8| (a as f32 * t) as u8;
+        let clip = frame.clip();
 
         let (bx, by, bw, bh) = self.top_bar_rect();
         let bar_lift = ((1.0 - t) * 22.0) as i32;
-        shapes::drop_shadow(frame, bx, by - bar_lift, bw, bh, 22);
-        frame.glass_fill(bx, by - bar_lift, bw, bh, 22, Color::LUMEN_CARD.with_alpha(alpha(130)));
-        shapes::glass_highlights(frame, bx, by - bar_lift, bw, bh, 22, alpha(255));
+        if Rect::from_size(bx, by - bar_lift, bw, bh).expand(SHADOW_REACH).intersects(&clip) {
+            shapes::drop_shadow(frame, bx, by - bar_lift, bw, bh, 22);
+            frame.glass_fill(bx, by - bar_lift, bw, bh, 22, Color::LUMEN_CARD.with_alpha(130), alpha(255));
+            shapes::glass_highlights(frame, bx, by - bar_lift, bw, bh, 22, alpha(255));
+        }
 
         let (dx, dy, dw, dh) = self.dock_rect();
         let dock_lift = ((1.0 - t) * 40.0) as i32;
+        if !Rect::from_size(dx, dy + dock_lift, dw, dh).expand(SHADOW_REACH).intersects(&clip) {
+            return;
+        }
         shapes::drop_shadow(frame, dx, dy + dock_lift, dw, dh, 26);
-        frame.glass_fill(dx, dy + dock_lift, dw, dh, 26, Color::LUMEN_CARD.with_alpha(alpha(130)));
+        frame.glass_fill(dx, dy + dock_lift, dw, dh, 26, Color::LUMEN_CARD.with_alpha(130), alpha(255));
         shapes::glass_highlights(frame, dx, dy + dock_lift, dw, dh, 26, alpha(255));
 
         let icon_size = 52;

@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use bootloader_api::info::{FrameBuffer as BootFb, FrameBufferInfo, PixelFormat as FbFormat};
 use spin::Mutex;
 
-use crate::gfx::{shapes, Canvas, Color, Framebuffer};
+use crate::gfx::{shapes, Canvas, Color, Damage, Framebuffer, Rect};
 
 /// How far the wallpaper is smeared for the frosted-glass cache. Two passes of
 /// a box blur at this radius is a close enough gaussian at this scale.
@@ -41,15 +41,28 @@ impl Frame<'_> {
     /// is then three table lookups and three byte writes, with no blending
     /// arithmetic and no per-pixel format decision at all. Only the
     /// antialiased rim takes the general path.
-    pub fn glass_fill(&mut self, x: i32, y: i32, w: i32, h: i32, r: i32, tint: Color) {
+    pub fn glass_fill(
+        &mut self,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        r: i32,
+        tint: Color,
+        opacity: u8,
+    ) {
+        if opacity == 0 {
+            return;
+        }
         if w <= 0 || h <= 0 {
             return;
         }
         let r = r.max(0).min(w / 2).min(h / 2);
-        let x0 = x.max(0);
-        let y0 = y.max(0);
-        let x1 = (x + w).min(self.target.width() as i32);
-        let y1 = (y + h).min(self.target.height() as i32);
+        let clip = self.target.clip();
+        let x0 = x.max(clip.x0);
+        let y0 = y.max(clip.y0);
+        let x1 = (x + w).min(clip.x1);
+        let y1 = (y + h).min(clip.y1);
         if x1 <= x0 || y1 <= y0 {
             return;
         }
@@ -69,29 +82,53 @@ impl Frame<'_> {
             };
 
             for px in x0..run_start {
-                self.glass_pixel(px, py, x, y, w, h, r, tint);
+                self.glass_pixel(px, py, x, y, w, h, r, tint, opacity);
             }
             if run_end > run_start {
-                let src = self.blurred.row(py as usize);
-                let dst = self.target.row_mut(py as usize);
-                let from = run_start as usize * bpp;
-                let to = run_end as usize * bpp;
-                lut.apply(&src[from..to], &mut dst[from..to], bpp);
+                if opacity == 255 {
+                    let src = self.blurred.row(py as usize);
+                    let dst = self.target.row_mut(py as usize);
+                    let from = run_start as usize * bpp;
+                    let to = run_end as usize * bpp;
+                    lut.apply(&src[from..to], &mut dst[from..to], bpp);
+                } else {
+                    // A panel that is still fading in has to blend against what
+                    // is behind it, so the table path cannot be used.
+                    for px in run_start..run_end {
+                        self.glass_pixel(px, py, x, y, w, h, r, tint, opacity);
+                    }
+                }
             }
             for px in run_end.max(run_start)..x1 {
-                self.glass_pixel(px, py, x, y, w, h, r, tint);
+                self.glass_pixel(px, py, x, y, w, h, r, tint, opacity);
             }
         }
     }
 
-    fn glass_pixel(&mut self, px: i32, py: i32, x: i32, y: i32, w: i32, h: i32, r: i32, tint: Color) {
+    #[allow(clippy::too_many_arguments)]
+    fn glass_pixel(
+        &mut self,
+        px: i32,
+        py: i32,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        r: i32,
+        tint: Color,
+        opacity: u8,
+    ) {
         let cov = shapes::rounded_coverage(px - x, py - y, w, h, r);
         if cov == 0 {
             return;
         }
+        let alpha = crate::gfx::color::mul255(cov, opacity);
+        if alpha == 0 {
+            return;
+        }
         let sample = self.blurred.read_pixel(px as usize, py as usize);
         let glass = tint.over(sample);
-        self.target.paint(px as usize, py as usize, glass.fade(cov));
+        self.target.paint(px as usize, py as usize, glass.fade(alpha));
     }
 }
 
@@ -133,6 +170,10 @@ impl TintTable {
 impl Canvas for Frame<'_> {
     fn width(&self) -> usize {
         self.target.width()
+    }
+
+    fn clip(&self) -> Rect {
+        self.target.clip()
     }
 
     fn height(&self) -> usize {
@@ -203,29 +244,60 @@ pub fn bake_background<F: FnOnce(&mut Framebuffer)>(f: F) {
     crate::gfx::blur::box_blur_region(&mut blurred, 0, 0, w, h, GLASS_RADIUS, GLASS_PASSES);
 }
 
-pub fn render<F: FnOnce(&mut Frame)>(f: F) {
+/// Repaints only the damaged regions and shows only those.
+///
+/// The back buffer is never cleared between frames: whatever was presented last
+/// frame is still in it, so a region that nobody damaged is already correct.
+/// Each damaged region is restored from the wallpaper, redrawn with the clip
+/// set to that region, and copied out to the screen.
+pub fn render<F: Fn(&mut Frame)>(damage: &Damage, f: F) {
     let mut guard = DISPLAY.lock();
     let display = match guard.as_mut() {
         Some(d) => d,
         None => return,
     };
     let info = display.info;
+    let stride = info.stride * info.bytes_per_pixel;
+    let bpp = info.bytes_per_pixel;
 
-    display.back.copy_from_slice(&display.background);
+    for region in damage.regions() {
+        let region = *region;
+        if region.is_empty() {
+            continue;
+        }
+        let x_off = region.x0 as usize * bpp;
+        let run = (region.x1 - region.x0) as usize * bpp;
 
-    {
-        let mut frame = Frame {
-            target: Framebuffer::from_raw(&mut display.back, info),
-            blurred: Framebuffer::from_raw(&mut display.blurred, info),
-        };
-        f(&mut frame);
-    }
+        for py in region.y0 as usize..region.y1 as usize {
+            let off = py * stride + x_off;
+            if off + run > display.back.len() {
+                break;
+            }
+            display.back[off..off + run].copy_from_slice(&display.background[off..off + run]);
+        }
 
-    unsafe {
-        core::ptr::copy_nonoverlapping(
-            display.back.as_ptr(),
-            display.front,
-            display.back.len(),
-        );
+        {
+            let mut target = Framebuffer::from_raw(&mut display.back, info);
+            target.set_clip(region);
+            let mut frame = Frame {
+                target,
+                blurred: Framebuffer::from_raw(&mut display.blurred, info),
+            };
+            f(&mut frame);
+        }
+
+        for py in region.y0 as usize..region.y1 as usize {
+            let off = py * stride + x_off;
+            if off + run > display.back.len() {
+                break;
+            }
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    display.back.as_ptr().add(off),
+                    display.front.add(off),
+                    run,
+                );
+            }
+        }
     }
 }

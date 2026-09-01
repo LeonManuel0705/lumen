@@ -1,5 +1,5 @@
 use crate::anim::Spring;
-use crate::gfx::{shapes, Color, Surface};
+use crate::gfx::{shapes, Color, Rect, Surface};
 
 use super::{App, AppInput};
 
@@ -42,6 +42,27 @@ impl BallApp {
         }
     }
 
+    /// Everything the ball puts on the surface: the trail, the ball itself,
+    /// and the shadow on the floor below it, generously inflated.
+    fn ink(&self) -> Rect {
+        let mut r = Rect::new(i32::MAX, i32::MAX, i32::MIN, i32::MIN);
+        for (tx, ty) in self.trail.iter() {
+            r.x0 = r.x0.min(*tx as i32);
+            r.y0 = r.y0.min(*ty as i32);
+            r.x1 = r.x1.max(*tx as i32);
+            r.y1 = r.y1.max(*ty as i32);
+        }
+        r.x0 = r.x0.min(self.x as i32);
+        r.y0 = r.y0.min(self.y as i32);
+        r.x1 = r.x1.max(self.x as i32);
+        r.y1 = r.y1.max(self.y as i32);
+        let pad = (RADIUS * 2.0) as i32;
+        let r = r.expand(pad);
+        // The shadow sits on the floor under wherever the ball has been.
+        let floor = Rect::new(r.x0, self.height as i32 - (RADIUS as i32), r.x1, self.height as i32);
+        r.union(&floor)
+    }
+
     fn reset(&mut self) {
         self.x = self.width * 0.5;
         self.y = RADIUS + 8.0;
@@ -54,6 +75,10 @@ impl BallApp {
 impl App for BallApp {
     fn title(&self) -> &'static str {
         "Ball"
+    }
+
+    fn painted(&self) -> Option<Rect> {
+        Some(self.ink())
     }
 
     fn update(&mut self, dt: f32, input: &AppInput) {
