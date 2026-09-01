@@ -5,6 +5,7 @@
 extern crate alloc;
 
 mod anim;
+mod apps;
 mod arch;
 mod datefmt;
 mod display;
@@ -15,6 +16,7 @@ mod rng;
 mod scene;
 mod serial;
 mod widgets;
+mod wm;
 
 use bootloader_api::config::{BootloaderConfig, Mapping};
 use bootloader_api::{entry_point, BootInfo};
@@ -96,15 +98,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let dt = 1.0 / arch::TICK_HZ as f32;
     let mut last_seen: u64 = 0;
     let mut last_shown = day_base;
-
-    let empty = Snapshot {
-        mouse_dx: 0,
-        mouse_dy: 0,
-        buttons: 0,
-        buttons_just_pressed: 0,
-        key_pressed_space: false,
-        key_pressed_r: false,
-    };
+    let mut frames: u32 = 0;
+    let mut fps_window = TICKS.load(Ordering::Relaxed);
 
     loop {
         let now = TICKS.load(Ordering::Relaxed);
@@ -137,15 +132,36 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         scene.set_clock(shown);
 
         let real_input = input::snapshot();
+        // Extra catch-up steps must not replay one-shot events, but they do
+        // have to keep level state like a held mouse button: a drag lives
+        // across every substep of the frame it started in.
+        let carry = Snapshot {
+            mouse_dx: 0,
+            mouse_dy: 0,
+            buttons: real_input.buttons,
+            buttons_just_pressed: 0,
+            key_pressed_space: false,
+            key_pressed_r: false,
+        };
         let mut applied = false;
         while steps > 0 {
-            let snap = if !applied { applied = true; &real_input } else { &empty };
+            let snap = if !applied { applied = true; &real_input } else { &carry };
             scene.update(dt, snap);
             steps -= 1;
         }
         last_seen = now;
 
         display::render(|fb| scene.draw(fb));
+
+        // The compositor is the whole point of this kernel, so keep an eye on
+        // what it actually costs.
+        frames += 1;
+        if now - fps_window >= 10 * arch::TICK_HZ as u64 {
+            let secs = ticks_to_secs_f32(now - fps_window);
+            serial_println!("[lumen] {} fps", (frames as f32 / secs) as u32);
+            frames = 0;
+            fps_window = now;
+        }
 
         x86_64::instructions::interrupts::enable_and_hlt();
     }
@@ -163,6 +179,10 @@ fn day_seconds(t: &arch::rtc::Time) -> u32 {
 
 // The PIT runs at PIT_BASE_FREQ/divisor, not exactly TICK_HZ; dividing ticks
 // by TICK_HZ would gain ~1.6s/day.
+fn ticks_to_secs_f32(ticks: u64) -> f32 {
+    ticks as f32 * arch::pit::divisor_for(arch::TICK_HZ) as f32 / arch::pit::PIT_BASE_FREQ as f32
+}
+
 fn ticks_to_secs(ticks: u64) -> u64 {
     ticks * arch::pit::divisor_for(arch::TICK_HZ) as u64 / arch::pit::PIT_BASE_FREQ as u64
 }

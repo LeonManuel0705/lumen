@@ -20,6 +20,38 @@ impl Surface {
         }
     }
 
+    /// Fades out the alpha in the corners so window content follows the shape
+    /// of the frame it sits in instead of poking out of it.
+    pub fn round_corners(&mut self, radius: i32, top: bool, bottom: bool) {
+        if radius <= 0 {
+            return;
+        }
+        let w = self.width as i32;
+        let h = self.height as i32;
+        let radius = radius.min(w / 2).min(h / 2);
+        for y in 0..h {
+            let in_top = y < radius;
+            let in_bottom = y >= h - radius;
+            if !(in_top && top) && !(in_bottom && bottom) {
+                continue;
+            }
+            for x in 0..w {
+                if x >= radius && x < w - radius {
+                    continue;
+                }
+                let cov = super::shapes::rounded_coverage(x, y, w, h, radius);
+                if cov == 255 {
+                    continue;
+                }
+                let idx = y as usize * self.width + x as usize;
+                let a = self.pixels[idx].a as u32 * cov as u32 / 255;
+                self.pixels[idx].a = a as u8;
+            }
+        }
+    }
+
+    /// Hard-overwrites every pixel. Blending would fold this frame into the
+    /// last one, so a surface has to be cleared, not painted over.
     pub fn clear(&mut self, c: Color) {
         self.pixels.fill(c);
     }
@@ -42,18 +74,10 @@ impl Surface {
 
         for py in y0..y1 {
             let sy = (py - y) as usize;
-            for px in x0..x1 {
-                let src = self.at((px - x) as usize, sy);
-                if src.a == 0 {
-                    continue;
-                }
-                let a = if opacity == 255 {
-                    src.a
-                } else {
-                    ((src.a as u32 * opacity as u32) / 255) as u8
-                };
-                dst.paint(px as usize, py as usize, src.with_alpha(a));
-            }
+            let sx = (x0 - x) as usize;
+            let run = (x1 - x0) as usize;
+            let start = sy * self.width + sx;
+            dst.blend_row(x0 as usize, py as usize, &self.pixels[start..start + run], opacity);
         }
     }
 
@@ -105,12 +129,7 @@ impl Surface {
                 if src.a == 0 {
                     continue;
                 }
-                let a = if opacity == 255 {
-                    src.a
-                } else {
-                    ((src.a as u32 * opacity as u32) / 255) as u8
-                };
-                dst.paint(px as usize, py as usize, src.with_alpha(a));
+                dst.paint(px as usize, py as usize, src.fade(opacity));
             }
         }
     }
@@ -133,6 +152,21 @@ impl Canvas for Surface {
             return;
         }
         self.pixels[y * self.width + x] = c;
+    }
+
+    fn fill_row(&mut self, x: usize, y: usize, len: usize, c: Color) {
+        if c.a == 0 || y >= self.height || x >= self.width {
+            return;
+        }
+        let n = len.min(self.width - x);
+        let start = y * self.width + x;
+        if c.a == 255 {
+            self.pixels[start..start + n].fill(c);
+            return;
+        }
+        for slot in self.pixels[start..start + n].iter_mut() {
+            *slot = c.over_straight(*slot);
+        }
     }
 
     fn blend_pixel(&mut self, x: usize, y: usize, c: Color) {
