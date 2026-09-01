@@ -121,7 +121,7 @@ the share of each frame actually spent working, at 1280x720 under emulation:
 
 | Scene | Before damage tracking | After |
 |:---|:---|:---|
-| Lock screen | 60 fps, 37% busy | 60 fps, 25% busy |
+| Lock screen | 60 fps, 37% busy | 60 fps, 26% busy |
 | Desktop, ball bouncing in a window | 30 fps, 70% busy | 60 fps, 41% busy |
 | Desktop, no windows open | full redraw every frame | 60 fps, 9% busy |
 
