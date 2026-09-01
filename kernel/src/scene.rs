@@ -1,8 +1,10 @@
 use crate::anim::{easing, Spring, Tween};
+use crate::apps::AppKind;
 use crate::display::Frame;
 use crate::gfx::{font_data, shapes, Canvas, Color, Framebuffer};
 use crate::input::Snapshot;
 use crate::widgets::{self, RollingClock};
+use crate::wm::WindowManager;
 
 #[derive(PartialEq, Copy, Clone)]
 enum ShellMode {
@@ -11,12 +13,17 @@ enum ShellMode {
     Desktop,
 }
 
-const TRAIL_LEN: usize = 22;
 const FLOOR_FROM_BOTTOM: f32 = 110.0;
-const GRAVITY: f32 = 1800.0;
-const BALL_RADIUS: f32 = 38.0;
 const MAX_RIPPLES: usize = 8;
 const DOCK_ICONS: usize = 6;
+const DOCK_APPS: [Option<AppKind>; DOCK_ICONS] = [
+    Some(AppKind::Ball),
+    Some(AppKind::Clock),
+    None,
+    None,
+    None,
+    None,
+];
 const DOCK_TINTS: [Color; DOCK_ICONS] = [
     Color::LUMEN_ACCENT,
     Color::LUMEN_GLOW,
@@ -39,14 +46,6 @@ pub struct Scene {
     width: f32,
     height: f32,
     clock_phase: f32,
-    ball_x: f32,
-    ball_y: f32,
-    vx: f32,
-    vy: f32,
-    squash: Spring,
-    trail: [(f32, f32); TRAIL_LEN],
-    trail_idx: usize,
-    pulse: Spring,
     sun_x: f32,
     sun_y: f32,
     cursor_target_x: f32,
@@ -63,6 +62,7 @@ pub struct Scene {
     unlock: Tween,
     date_buf: [u8; 48],
     date_len: usize,
+    windows: WindowManager,
 }
 
 impl Scene {
@@ -75,14 +75,6 @@ impl Scene {
             width: w,
             height: h,
             clock_phase: 0.0,
-            ball_x: mid_x,
-            ball_y: BALL_RADIUS + 10.0,
-            vx: 220.0,
-            vy: 0.0,
-            squash: Spring::new(0.0, 220.0, 14.0),
-            trail: [(mid_x, BALL_RADIUS + 10.0); TRAIL_LEN],
-            trail_idx: 0,
-            pulse: Spring::new(1.0, 120.0, 12.0),
             sun_x: w - w * 0.18,
             sun_y: h * 0.22,
             cursor_target_x: mid_x,
@@ -99,12 +91,14 @@ impl Scene {
             unlock: Tween::new(0.55, 0.0),
             date_buf: [0; 48],
             date_len: 0,
+            windows: WindowManager::new(w, h),
         }
     }
 
     pub fn set_clock(&mut self, day_seconds: u32) {
         self.top_clock.set(day_seconds);
         self.big_clock.set(day_seconds);
+        self.windows.set_clock(day_seconds);
     }
 
     pub fn set_date(&mut self, bytes: &[u8]) {
@@ -117,11 +111,27 @@ impl Scene {
         self.mode = ShellMode::Unlocking;
         self.unlock.restart();
         self.clock_entrance.restart();
-        self.ball_x = self.width * 0.5;
-        self.ball_y = BALL_RADIUS + 10.0;
-        self.vx = 220.0;
-        self.vy = 0.0;
-        self.trail = [(self.ball_x, self.ball_y); TRAIL_LEN];
+        // The desktop arrives with something on it, one window after the other.
+        self.windows.open(AppKind::Ball, self.width * 0.19, self.height * 0.28, 0.24);
+        self.windows.open(AppKind::Clock, self.width * 0.63, self.height * 0.34, 0.44);
+    }
+
+    fn dock_icon_rect(&self, i: usize) -> (i32, i32, i32, i32) {
+        let (dx, dy, dw, dh) = self.dock_rect();
+        let size = 52;
+        let gap = (dw - size * DOCK_ICONS as i32 - 24) / (DOCK_ICONS as i32 - 1).max(1);
+        (dx + 12 + i as i32 * (size + gap), dy + (dh - size) / 2, size, size)
+    }
+
+    fn dock_hit(&self, px: f32, py: f32) -> Option<AppKind> {
+        for i in 0..DOCK_ICONS {
+            let (x, y, w, h) = self.dock_icon_rect(i);
+            // Generous vertical slack: the icons are small targets.
+            if px >= x as f32 && px < (x + w) as f32 && py >= (y - 6) as f32 && py < (y + h + 10) as f32 {
+                return DOCK_APPS[i];
+            }
+        }
+        None
     }
 
     pub fn update(&mut self, dt: f32, input: &Snapshot) {
@@ -137,88 +147,37 @@ impl Scene {
         self.cursor_x.step(dt);
         self.cursor_y.step(dt);
 
+        let click = input.buttons_just_pressed & 0x01 != 0;
+        let held = input.buttons & 0x01 != 0;
+        let cursor = (self.cursor_x.current, self.cursor_y.current);
+
         if self.mode == ShellMode::Locked {
-            if input.buttons_just_pressed & 0x01 != 0 {
-                self.spawn_ripple(self.cursor_x.current, self.cursor_y.current);
+            if click {
+                self.spawn_ripple(cursor.0, cursor.1);
             }
-            if input.key_pressed_space || input.buttons_just_pressed & 0x01 != 0 {
+            if input.key_pressed_space || click {
                 self.begin_unlock();
             }
         } else {
-            if input.buttons_just_pressed & 0x01 != 0 {
-                let click_x = self.cursor_x.current;
-                let click_y = self.cursor_y.current;
-                self.spawn_ripple(click_x, click_y);
-                let dx = click_x - self.ball_x;
-                let dy = click_y - self.ball_y;
-                let len_sq = dx * dx + dy * dy;
-                if self.mode == ShellMode::Desktop && len_sq < (BALL_RADIUS * 1.4) * (BALL_RADIUS * 1.4) {
-                    let scale = if len_sq > 4.0 { 1.0 / BALL_RADIUS } else { 0.0 };
-                    self.vx = -dx * scale * 760.0;
-                    self.vy = -dy * scale * 760.0 - 320.0;
-                    self.squash.nudge(-15.0);
-                    self.pulse.nudge(-3.0);
+            if click {
+                self.spawn_ripple(cursor.0, cursor.1);
+            }
+            let mut taken = false;
+            if click && self.mode == ShellMode::Desktop {
+                if let Some(kind) = self.dock_hit(cursor.0, cursor.1) {
+                    self.windows.open(kind, self.width * 0.32, self.height * 0.3, 0.0);
+                    taken = true;
                 }
             }
-
-            if self.mode == ShellMode::Desktop && input.key_pressed_space {
-                self.vy = -780.0;
-                self.vx += crate::rng::sign() * 80.0;
-                self.squash.nudge(-10.0);
-                self.pulse.nudge(-2.0);
-            }
-
-            if self.mode == ShellMode::Desktop && input.key_pressed_r {
-                self.ball_x = self.width * 0.5;
-                self.ball_y = BALL_RADIUS + 10.0;
-                self.vx = 220.0;
-                self.vy = 0.0;
-                self.trail = [(self.ball_x, self.ball_y); TRAIL_LEN];
-            }
-
-            self.vy += GRAVITY * dt;
-            self.ball_x += self.vx * dt;
-            self.ball_y += self.vy * dt;
-
-            let floor_y = self.height - FLOOR_FROM_BOTTOM;
-
-            if self.ball_x - BALL_RADIUS < 0.0 {
-                self.ball_x = BALL_RADIUS;
-                self.vx = self.vx.abs() * 0.88;
-                self.squash.nudge(8.0);
-                self.pulse.nudge(-2.0);
-            }
-            if self.ball_x + BALL_RADIUS > self.width {
-                self.ball_x = self.width - BALL_RADIUS;
-                self.vx = -self.vx.abs() * 0.88;
-                self.squash.nudge(8.0);
-                self.pulse.nudge(-2.0);
-            }
-            if self.ball_y + BALL_RADIUS > floor_y {
-                self.ball_y = floor_y - BALL_RADIUS;
-                if self.vy.abs() < 60.0 {
-                    self.vy = -560.0;
-                    self.vx += crate::rng::sign() * 80.0;
-                } else {
-                    self.vy = -self.vy.abs() * 0.84;
-                }
-                self.squash.nudge(-12.0);
-                self.pulse.nudge(-4.0);
-            }
-            if self.ball_y - BALL_RADIUS < 0.0 {
-                self.ball_y = BALL_RADIUS;
-                self.vy = self.vy.abs() * 0.7;
-                self.squash.nudge(-6.0);
-            }
+            self.windows.update(
+                dt,
+                cursor,
+                click && !taken,
+                held,
+                input.key_pressed_space,
+                input.key_pressed_r,
+            );
         }
-
-        self.squash.set_target(0.0);
-        self.squash.step(dt);
-        self.pulse.set_target(1.0);
-        self.pulse.step(dt);
-
-        self.trail[self.trail_idx] = (self.ball_x, self.ball_y);
-        self.trail_idx = (self.trail_idx + 1) % TRAIL_LEN;
 
         self.clock_entrance.step(dt);
         if self.mode == ShellMode::Locked {
@@ -303,14 +262,14 @@ impl Scene {
         let (bx, by, bw, bh) = self.top_bar_rect();
         let bar_lift = ((1.0 - t) * 22.0) as i32;
         shapes::drop_shadow(frame, bx, by - bar_lift, bw, bh, 22);
-        frame.glass_backdrop(bx, by - bar_lift, bw, bh, 22);
-        shapes::glass_panel(frame, bx, by - bar_lift, bw, bh, 22, Color::LUMEN_CARD.with_alpha(alpha(130)));
+        frame.glass_fill(bx, by - bar_lift, bw, bh, 22, Color::LUMEN_CARD.with_alpha(alpha(130)));
+        shapes::glass_highlights(frame, bx, by - bar_lift, bw, bh, 22, alpha(255));
 
         let (dx, dy, dw, dh) = self.dock_rect();
         let dock_lift = ((1.0 - t) * 40.0) as i32;
         shapes::drop_shadow(frame, dx, dy + dock_lift, dw, dh, 26);
-        frame.glass_backdrop(dx, dy + dock_lift, dw, dh, 26);
-        shapes::glass_panel(frame, dx, dy + dock_lift, dw, dh, 26, Color::LUMEN_CARD.with_alpha(alpha(130)));
+        frame.glass_fill(dx, dy + dock_lift, dw, dh, 26, Color::LUMEN_CARD.with_alpha(alpha(130)));
+        shapes::glass_highlights(frame, dx, dy + dock_lift, dw, dh, 26, alpha(255));
 
         let icon_size = 52;
         let icon_gap = (dw - icon_size * DOCK_ICONS as i32 - 24) / (DOCK_ICONS as i32 - 1).max(1);
@@ -373,7 +332,7 @@ impl Scene {
 
     pub fn draw(&self, fb: &mut Frame) {
         if self.mode != ShellMode::Locked {
-            self.draw_desktop(fb);
+            self.windows.draw(fb);
         }
         self.draw_chrome(fb);
         if self.mode != ShellMode::Locked {
@@ -402,65 +361,4 @@ impl Scene {
         shapes::fill_circle(fb, cx, cy, 3,  Color::WHITE);
     }
 
-    fn draw_desktop<C: Canvas>(&self, fb: &mut C) {
-        let floor_y = (self.height - FLOOR_FROM_BOTTOM) as i32;
-
-        for i in 0..TRAIL_LEN {
-            let idx = (self.trail_idx + i) % TRAIL_LEN;
-            let age = i as f32 / TRAIL_LEN as f32;
-            let alpha = (age * age * 90.0) as u8;
-            if alpha < 8 { continue; }
-            let (tx, ty) = self.trail[idx];
-            let r = (BALL_RADIUS * (0.4 + age * 0.5)) as i32;
-            shapes::fill_circle(fb, tx as i32, ty as i32, r, Color::LUMEN_ACCENT.with_alpha(alpha));
-        }
-
-        let height_above_floor = (floor_y as f32 - self.ball_y - BALL_RADIUS).max(0.0);
-        let shadow_t = (1.0 - (height_above_floor / 400.0).min(1.0)).max(0.1);
-        let shadow_rx = (BALL_RADIUS * (0.6 + shadow_t * 0.7)) as i32;
-        let shadow_ry = (BALL_RADIUS * 0.18 * (0.5 + shadow_t)) as i32;
-        let shadow_alpha = (90.0 * shadow_t) as u8;
-        shapes::fill_ellipse(
-            fb,
-            self.ball_x as i32,
-            floor_y - 4,
-            shadow_rx,
-            shadow_ry.max(2),
-            Color::rgba(20, 50, 90, shadow_alpha),
-        );
-
-        let s = self.squash.current.clamp(-18.0, 18.0);
-        let stretch = s * 0.012;
-        let rx = (BALL_RADIUS * (1.0 - stretch)) as i32;
-        let ry = (BALL_RADIUS * (1.0 + stretch)) as i32;
-        let pulse = self.pulse.current.clamp(0.7, 1.4);
-        let core_rx = ((rx as f32) * pulse) as i32;
-        let core_ry = ((ry as f32) * pulse) as i32;
-
-        shapes::fill_ellipse(
-            fb,
-            self.ball_x as i32,
-            self.ball_y as i32,
-            (core_rx as f32 * 1.18) as i32,
-            (core_ry as f32 * 1.18) as i32,
-            Color::LUMEN_ACCENT.with_alpha(80),
-        );
-        shapes::fill_ellipse(
-            fb,
-            self.ball_x as i32,
-            self.ball_y as i32,
-            core_rx,
-            core_ry,
-            Color::LUMEN_ACCENT,
-        );
-        shapes::fill_ellipse(
-            fb,
-            self.ball_x as i32 - core_rx / 3,
-            self.ball_y as i32 - core_ry / 3,
-            core_rx / 3,
-            core_ry / 3,
-            Color::rgba(255, 255, 255, 200),
-        );
-
-    }
 }

@@ -1,3 +1,12 @@
+/// `a * b / 255`, exactly, without the divide. The compositor does this a few
+/// million times a second, and division is the one thing an emulated CPU is
+/// really bad at.
+#[inline(always)]
+pub fn mul255(a: u8, b: u8) -> u8 {
+    let t = a as u32 * b as u32 + 128;
+    ((t + (t >> 8)) >> 8) as u8
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Color {
     pub r: u8,
@@ -34,6 +43,12 @@ impl Color {
         Self { a, ..self }
     }
 
+    /// Scales the colour's own alpha, which is what fading and coverage do.
+    #[inline(always)]
+    pub fn fade(self, factor: u8) -> Self {
+        Self { a: mul255(self.a, factor), ..self }
+    }
+
     pub fn lerp(a: Color, b: Color, t: u8) -> Color {
         let mix = |x: u8, y: u8| -> u8 {
             let xi = x as u16;
@@ -54,11 +69,9 @@ impl Color {
     pub fn over(self, dst: Color) -> Color {
         if self.a == 255 { return self; }
         if self.a == 0   { return dst; }
-        let sa = self.a as u16;
+        let sa = self.a;
         let inv = 255 - sa;
-        let blend = |s: u8, d: u8| -> u8 {
-            ((s as u16 * sa + d as u16 * inv) / 255) as u8
-        };
+        let blend = |s: u8, d: u8| -> u8 { mul255(s, sa) + mul255(d, inv) };
         Color {
             r: blend(self.r, dst.r),
             g: blend(self.g, dst.g),

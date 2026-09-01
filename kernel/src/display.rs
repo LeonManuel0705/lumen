@@ -1,6 +1,6 @@
 use alloc::vec;
 use alloc::vec::Vec;
-use bootloader_api::info::{FrameBuffer as BootFb, FrameBufferInfo};
+use bootloader_api::info::{FrameBuffer as BootFb, FrameBufferInfo, PixelFormat as FbFormat};
 use spin::Mutex;
 
 use crate::gfx::{shapes, Canvas, Color, Framebuffer};
@@ -33,9 +33,15 @@ pub struct Frame<'a> {
 }
 
 impl Frame<'_> {
-    /// Lays the blurred wallpaper into a rounded rectangle. Everything a glass
-    /// panel needs on top of that (tint, rim light, border) is drawn after.
-    pub fn glass_backdrop(&mut self, x: i32, y: i32, w: i32, h: i32, r: i32) {
+    /// Lays the blurred wallpaper into a rounded rectangle and tints it in the
+    /// same pass. The rim light and border go on top afterwards.
+    ///
+    /// The inside of the shape is the hot loop of the whole compositor, so the
+    /// tint is folded into three 256-entry tables first: every interior pixel
+    /// is then three table lookups and three byte writes, with no blending
+    /// arithmetic and no per-pixel format decision at all. Only the
+    /// antialiased rim takes the general path.
+    pub fn glass_fill(&mut self, x: i32, y: i32, w: i32, h: i32, r: i32, tint: Color) {
         if w <= 0 || h <= 0 {
             return;
         }
@@ -44,17 +50,82 @@ impl Frame<'_> {
         let y0 = y.max(0);
         let x1 = (x + w).min(self.target.width() as i32);
         let y1 = (y + h).min(self.target.height() as i32);
+        if x1 <= x0 || y1 <= y0 {
+            return;
+        }
+
+        let lut = TintTable::new(tint, self.target.format());
+        let bpp = self.target.bytes_per_pixel();
 
         for py in y0..y1 {
-            for px in x0..x1 {
-                let cov = shapes::rounded_coverage(px - x, py - y, w, h, r);
-                if cov == 0 {
-                    continue;
-                }
-                let sample = self.blurred.read_pixel(px as usize, py as usize);
-                self.target
-                    .blend_pixel(px as usize, py as usize, sample.with_alpha(cov));
+            // Inside the vertical straight section every pixel between the
+            // corners is fully covered, so the run can be done wholesale.
+            let ly = py - y;
+            let (run_start, run_end) = if ly >= r && ly < h - r {
+                (x0, x1)
+            } else {
+                let inset = shapes::corner_inset(ly, h, r);
+                ((x + inset).max(x0), (x + w - inset).min(x1))
+            };
+
+            for px in x0..run_start {
+                self.glass_pixel(px, py, x, y, w, h, r, tint);
             }
+            if run_end > run_start {
+                let src = self.blurred.row(py as usize);
+                let dst = self.target.row_mut(py as usize);
+                let from = run_start as usize * bpp;
+                let to = run_end as usize * bpp;
+                lut.apply(&src[from..to], &mut dst[from..to], bpp);
+            }
+            for px in run_end.max(run_start)..x1 {
+                self.glass_pixel(px, py, x, y, w, h, r, tint);
+            }
+        }
+    }
+
+    fn glass_pixel(&mut self, px: i32, py: i32, x: i32, y: i32, w: i32, h: i32, r: i32, tint: Color) {
+        let cov = shapes::rounded_coverage(px - x, py - y, w, h, r);
+        if cov == 0 {
+            return;
+        }
+        let sample = self.blurred.read_pixel(px as usize, py as usize);
+        let glass = tint.over(sample);
+        self.target.paint(px as usize, py as usize, glass.fade(cov));
+    }
+}
+
+/// Per-channel tables mapping a wallpaper byte to the tinted glass byte.
+struct TintTable {
+    table: [[u8; 256]; 3],
+}
+
+impl TintTable {
+    fn new(tint: Color, format: FbFormat) -> Self {
+        let channels = match format {
+            FbFormat::Rgb => [tint.r, tint.g, tint.b],
+            _ => [tint.b, tint.g, tint.r],
+        };
+        let mut table = [[0u8; 256]; 3];
+        let a = tint.a;
+        let inv = 255 - a;
+        for (slot, channel) in table.iter_mut().zip(channels) {
+            let base = crate::gfx::color::mul255(channel, a);
+            for (v, out) in slot.iter_mut().enumerate() {
+                *out = base + crate::gfx::color::mul255(v as u8, inv);
+            }
+        }
+        Self { table }
+    }
+
+    #[inline(always)]
+    fn apply(&self, src: &[u8], dst: &mut [u8], bpp: usize) {
+        let n = src.len().min(dst.len()) / bpp;
+        for i in 0..n {
+            let o = i * bpp;
+            dst[o] = self.table[0][src[o] as usize];
+            dst[o + 1] = self.table[1][src[o + 1] as usize];
+            dst[o + 2] = self.table[2][src[o + 2] as usize];
         }
     }
 }
@@ -74,6 +145,14 @@ impl Canvas for Frame<'_> {
 
     fn blend_pixel(&mut self, x: usize, y: usize, c: Color) {
         self.target.blend_pixel(x, y, c);
+    }
+
+    fn blend_row(&mut self, x: usize, y: usize, src: &[Color], opacity: u8) {
+        self.target.blend_row(x, y, src, opacity);
+    }
+
+    fn fill_row(&mut self, x: usize, y: usize, len: usize, c: Color) {
+        self.target.fill_row(x, y, len, c);
     }
 
     fn read_pixel(&self, x: usize, y: usize) -> Color {
