@@ -64,12 +64,19 @@ impl LumenAllocator {
     pub unsafe fn init(&self, start: usize, size: usize) {
         let mut heap = self.heap.lock();
         let aligned = align_up(start, GRAIN);
-        let usable = size - (aligned - start);
+        let usable = match size.checked_sub(aligned - start) {
+            Some(n) => n & !(GRAIN - 1),
+            None => 0,
+        };
+        if usable < MIN_BLOCK {
+            crate::serial_println!("[mem] heap region of {} bytes is too small to use", size);
+            return;
+        }
         let node = aligned as *mut FreeNode;
-        (*node).size = usable & !(GRAIN - 1);
+        (*node).size = usable;
         (*node).next = ptr::null_mut();
         heap.head = node;
-        heap.capacity = (*node).size;
+        heap.capacity = usable;
     }
 
     pub fn stats(&self) -> Stats {
@@ -110,7 +117,9 @@ unsafe impl GlobalAlloc for LumenAllocator {
             let block_start = node as usize;
             let block_end = block_start + (*node).size;
             let payload = align_up(block_start + HEADER, align);
-            let alloc_end = align_up(payload + layout.size(), GRAIN);
+            // Reserve a byte even for a zero-sized request, so the returned
+            // pointer can never land on the free node that follows it.
+            let alloc_end = align_up(payload + layout.size().max(1), GRAIN);
 
             if alloc_end <= block_end {
                 let next = (*node).next;

@@ -14,6 +14,8 @@ const CLOSE_SECONDS: f32 = 0.24;
 const CLOSE_DOT: i32 = 11;
 /// How far a window's shadow reaches past its own frame.
 const SHADOW_REACH: i32 = 32;
+/// The lowest a window may sit: clear of the shell's top bar.
+const TOP_BAR_FLOOR: f32 = 86.0;
 
 pub struct Window {
     id: u32,
@@ -45,14 +47,25 @@ impl Window {
     /// Where the window sits right now, and how solid it is: entrance and exit
     /// both work by scaling around the centre and fading.
     fn presentation(&self) -> (f32, u8) {
-        if let Some(close) = &self.closing {
-            let t = close.t();
-            let scale = 1.0 - 0.12 * easing::ease_in_quad(t);
-            return (scale, ((1.0 - t) * 255.0) as u8);
-        }
         let t = self.open.t();
         let scale = 0.86 + 0.14 * easing::ease_out_back(t);
-        (scale, (easing::ease_out_quad(t) * 255.0) as u8)
+        let opacity = easing::ease_out_quad(t);
+        let Some(close) = &self.closing else {
+            return (scale, (opacity * 255.0) as u8);
+        };
+        // Closing continues from wherever the entrance had got to, so a window
+        // dismissed mid-entrance shrinks away instead of snapping to full size.
+        let c = close.t();
+        (
+            scale * (1.0 - 0.12 * easing::ease_in_quad(c)),
+            (opacity * (1.0 - c) * 255.0) as u8,
+        )
+    }
+
+    /// A window nobody can see yet, because its entrance has not started, must
+    /// not be swallowing clicks meant for what is behind it.
+    fn is_interactive(&self) -> bool {
+        self.closing.is_none() && self.presentation().1 >= 8
     }
 
     fn frame_rect(&self) -> (i32, i32, i32, i32) {
@@ -152,7 +165,7 @@ impl WindowManager {
             app: kind.spawn(cw, ch),
             surface: Surface::new(cw, ch),
             x: x.clamp(8.0, (self.screen.0 - width as f32 - 8.0).max(8.0)),
-            y: y.clamp(80.0, (self.screen.1 - height as f32 - 8.0).max(80.0)),
+            y: y.clamp(TOP_BAR_FLOOR, (self.screen.1 - height as f32 - 8.0).max(TOP_BAR_FLOOR)),
             width,
             height,
             open: Tween::new(OPEN_SECONDS, delay),
@@ -173,6 +186,17 @@ impl WindowManager {
         }
     }
 
+    /// The window that owns focus: the topmost one that is not closing. A
+    /// window playing its close animation is still on screen but is nobody's
+    /// keyboard target any more.
+    fn focused_id(&self) -> Option<u32> {
+        self.windows
+            .iter()
+            .rev()
+            .find(|w| w.closing.is_none())
+            .map(|w| w.id)
+    }
+
     /// Routes a press to the topmost window under the pointer: close button
     /// first, then the title bar to start a drag, and anything else goes to the
     /// app. Returns false when the press missed every window.
@@ -180,7 +204,7 @@ impl WindowManager {
         let Some(idx) = self
             .windows
             .iter()
-            .rposition(|w| w.closing.is_none() && w.contains(px, py))
+            .rposition(|w| w.is_interactive() && w.contains(px, py))
         else {
             return false;
         };
@@ -219,13 +243,15 @@ impl WindowManager {
             let (sw, sh) = self.screen;
             if let Some(win) = self.windows.iter_mut().find(|w| w.id == id) {
                 let max_x = (sw - win.width as f32 * 0.4).max(0.0);
-                let max_y = (sh - TITLE_BAR as f32 - 8.0).max(0.0);
+                let max_y = (sh - TITLE_BAR as f32 - 8.0).max(TOP_BAR_FLOOR);
                 win.x = (cursor.0 - grab_x).clamp(-win.width as f32 * 0.6, max_x);
-                win.y = (cursor.1 - grab_y).clamp(8.0, max_y);
+                // Never let the title bar hide behind the shell's own top bar,
+                // where it would still be hit-tested but no longer visible.
+                win.y = (cursor.1 - grab_y).clamp(TOP_BAR_FLOOR, max_y);
             }
         }
 
-        let focused_id = self.windows.last().map(|w| w.id);
+        let focused_id = self.focused_id();
         let dragging_id = self.dragging.map(|(id, _, _)| id);
 
         for win in self.windows.iter_mut() {
@@ -326,7 +352,7 @@ impl WindowManager {
 
     pub fn draw(&self, frame: &mut Frame) {
         let clip = frame.clip();
-        let focused_id = self.windows.last().map(|w| w.id);
+        let focused_id = self.focused_id();
         for win in &self.windows {
             // Nothing of this window lands in the region being repainted.
             if !win.painted().intersects(&clip) {
