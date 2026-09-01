@@ -6,7 +6,7 @@ the whole compositor runs on bare metal with no standard library underneath it.
 
 Lumen boots on `x86_64`, talks directly to the hardware, and draws its own interface into
 a linear framebuffer. There is no libc, no allocator from a crate registry doing the heavy
-lifting, and no graphics stack. Roughly 2,800 lines of `no_std` Rust sit between the
+lifting, and no graphics stack. Roughly 3,700 lines of `no_std` Rust sit between the
 bootloader handoff and the pixels.
 
 ## Why build this
@@ -26,6 +26,9 @@ latency all become kernel concerns.
 * 8259 programmable interrupt controller remapped out of the exception vectors
 * Programmable interval timer driving a monotonic tick counter for animation timing
 * Real time clock read over CMOS, so the running system knows the actual date and time
+* Physical frame allocator over the bootloader memory map, page tables walked and
+  extended by the kernel, and a first-fit heap allocator written from scratch with
+  coalescing on free
 
 **Graphics**
 
@@ -37,6 +40,10 @@ latency all become kernel concerns.
   tool and embedded into the kernel binary
 * A lock screen as the boot destination: large rolling clock, the date spelled out in
   German from the CMOS date registers, and an animated unlock into the desktop
+* A window compositor: windows own an RGBA surface on the heap, stack, raise on click,
+  drag by the title bar, and scale in and out of existence. The glass they are made of
+  reads its frosted backdrop from a blurred copy of the wallpaper rather than blurring
+  the screen again every frame
 
 **Animation**
 
@@ -50,6 +57,14 @@ latency all become kernel concerns.
 * Keyboard decoding through scancode set translation
 * Mouse packet decoding with button state and relative movement
 
+**Apps**
+
+* A small app trait: a title, an update against local pointer and key state, and a draw
+  into the window's own surface
+* Ball, the bouncing ball that has been the animation testbed since the beginning, with
+  squash and stretch, a trail and a shadow that tightens as it falls
+* Uhr, the rolling clock with seconds
+
 ## Run it
 
 ```bash
@@ -59,8 +74,10 @@ cargo run
 That builds the kernel for `x86_64-unknown-none`, assembles a bootable BIOS disk image,
 and launches QEMU at 1280x720 with the host clock passed through.
 
-The current build boots into a lock screen. Space or a click unlocks it. On the desktop,
-click the ball to throw it, space to make it jump, R to reset the scene.
+The current build boots into a lock screen. Space or a click unlocks it, and the desktop
+arrives with two windows. Drag them by the title bar, click one to bring it to the front,
+click the red dot to close it, and click the first two dock icons to open them again.
+Inside the ball window, click the ball to throw it, space to make it jump, R to reset it.
 
 | Variable | Effect |
 |:---|:---|
@@ -76,6 +93,9 @@ click the ball to throw it, space to make it jump, R to reset the scene.
 | `kernel/src/gfx/` | Framebuffer, blur, shapes, colour, text, font data |
 | `kernel/src/anim/` | Spring integrator, tween engine, easing curves |
 | `kernel/src/input/` | PS/2, keyboard, mouse |
+| `kernel/src/mem/` | Frame allocator, page mapping, heap allocator |
+| `kernel/src/wm/` | Window compositor |
+| `kernel/src/apps/` | The app trait and the built-in apps |
 | `runner/` | Host side tool that builds the disk image and starts QEMU |
 | `tools/fontgen/` | Host side font atlas generator that emits the embedded glyph data |
 
@@ -87,15 +107,15 @@ unpinned nightly breaks the build roughly once a month.
 
 ## Status
 
-What runs today: the kernel boots, sets up its own descriptor tables and interrupts, keeps
-the real date and time from the CMOS clock, and comes up in a lock screen with a 96 pixel
-rolling clock and the German date. Space or a click plays a 0.55 second unlock into the
-desktop, where the animation and input demo lives. Keyboard and mouse are decoded from the
-PS/2 controller.
+What runs today: the kernel boots, sets up its own descriptor tables and interrupts, maps
+itself a 24 MiB heap, keeps the real date and time from the CMOS clock, and comes up in a
+lock screen with a 96 pixel rolling clock and the German date. Space or a click plays a
+0.55 second unlock into the desktop, where a compositor puts app windows on screen over a
+frosted top bar and dock. Keyboard and mouse are decoded from the PS/2 controller.
 
-There is no heap yet. Every buffer in the kernel is static or on the stack, which is the
-constraint that currently shapes the graphics code and the thing a window compositor would
-need solved first.
+The whole screen is redrawn every frame, which costs about 30 frames per second at
+1280x720 under emulation. The next real win is damage tracking: most of those pixels do
+not change between frames, and nothing in the compositor knows that yet.
 
 ## License
 
