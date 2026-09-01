@@ -20,6 +20,8 @@ struct Display {
     /// The same wallpaper pre-blurred. Glass panels read from here instead of
     /// blurring the screen live, which is what keeps them cheap enough to move.
     blurred: Vec<u8>,
+    /// Scratch space for the damage self-test: a full redraw to compare against.
+    check: Vec<u8>,
 }
 
 unsafe impl Send for Display {}
@@ -213,20 +215,64 @@ pub fn init(fb: &'static mut BootFb) {
         back: vec![0; len],
         background: vec![0; len],
         blurred: vec![0; len],
+        check: vec![0; len],
     });
     crate::serial_println!(
         "[display] {} KiB of buffers on the heap ({} bytes per frame)",
-        len * 3 / 1024,
+        len * 4 / 1024,
         len
     );
 }
 
 pub fn dimensions() -> Option<(usize, usize)> {
-    DISPLAY.lock().as_ref().map(|d| (d.info.width, d.info.height))
+    DISPLAY.lock().as_ref().map(|d| {
+        let stride = d.info.stride * d.info.bytes_per_pixel;
+        // Never report rows the buffers cannot actually back: a row that gets
+        // silently skipped during a present is stale until something else
+        // happens to damage it, which may be never.
+        (d.info.width, d.info.height.min(d.back.len() / stride.max(1)))
+    })
+}
+
+/// Redraws the whole scene from scratch into scratch space and compares it with
+/// what damage tracking actually produced. Returns the first pixel that
+/// disagrees, which is a region somebody forgot to claim.
+///
+/// This is the check that makes the whole scheme trustworthy: a missed damage
+/// rectangle is otherwise invisible until a human happens to look at the right
+/// part of the screen at the right moment.
+pub fn verify<F: Fn(&mut Frame)>(f: F) -> Option<(usize, usize)> {
+    let mut guard = DISPLAY.lock();
+    let display = guard.as_mut()?;
+    let info = display.info;
+    let stride = info.stride * info.bytes_per_pixel;
+
+    display.check.copy_from_slice(&display.background);
+    {
+        let mut target = Framebuffer::from_raw(&mut display.check, info);
+        target.set_clip(Rect::new(0, 0, info.width as i32, info.height as i32));
+        let mut frame = Frame {
+            target,
+            blurred: Framebuffer::from_raw(&mut display.blurred, info),
+        };
+        f(&mut frame);
+    }
+
+    let bpp = info.bytes_per_pixel.max(1);
+    for (i, (a, b)) in display.check.iter().zip(display.back.iter()).enumerate() {
+        if a != b {
+            return Some(((i % stride) / bpp, i / stride));
+        }
+    }
+    None
 }
 
 /// Draws the wallpaper once and refreshes the blurred copy the glass reads
 /// from. Expensive on purpose: it happens at boot, not per frame.
+///
+/// Anything that calls this again must mark the whole screen damaged in the
+/// same breath: the back buffer's untouched regions would otherwise still hold
+/// pixels composed against the old wallpaper.
 pub fn bake_background<F: FnOnce(&mut Framebuffer)>(f: F) {
     let mut guard = DISPLAY.lock();
     let display = match guard.as_mut() {

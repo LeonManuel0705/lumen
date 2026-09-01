@@ -56,10 +56,18 @@ impl BallApp {
         r.y0 = r.y0.min(self.y as i32);
         r.x1 = r.x1.max(self.x as i32);
         r.y1 = r.y1.max(self.y as i32);
-        let pad = (RADIUS * 2.0) as i32;
+        // The widest thing drawn is the outer glow at 1.18x the radius, times
+        // the pulse spring's ceiling, plus a pixel of antialiasing.
+        let pad = (RADIUS * 1.18 * 1.4) as i32 + 3;
         let r = r.expand(pad);
-        // The shadow sits on the floor under wherever the ball has been.
-        let floor = Rect::new(r.x0, self.height as i32 - (RADIUS as i32), r.x1, self.height as i32);
+        // The shadow only reaches as wide as the ball itself, on the floor.
+        let shadow_half = (RADIUS * 1.3) as i32 + 4;
+        let floor = Rect::new(
+            self.x as i32 - shadow_half,
+            self.height as i32 - (RADIUS as i32),
+            self.x as i32 + shadow_half,
+            self.height as i32,
+        );
         r.union(&floor)
     }
 

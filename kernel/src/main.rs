@@ -98,12 +98,18 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     serial_println!("[lumen] entering main loop");
 
+    // How often the compositor checks its own work. A missed damage region is
+    // silent by nature, so it is worth a full redraw every couple of seconds to
+    // find out. Set to 0 to turn the check off.
+    const VERIFY_EVERY: u32 = 120;
+
     let dt = 1.0 / arch::TICK_HZ as f32;
     let mut last_seen: u64 = 0;
     let mut last_shown = day_base;
     let mut frames: u32 = 0;
     let mut fps_window = TICKS.load(Ordering::Relaxed);
     let mut busy_cycles: u64 = 0;
+    let mut verify_cycles: u64 = 0;
     let mut window_start = arch::cycles();
 
     loop {
@@ -168,13 +174,23 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
         busy_cycles += arch::cycles() - frame_start;
 
+        if VERIFY_EVERY > 0 && frames % VERIFY_EVERY == VERIFY_EVERY - 1 {
+            let started = arch::cycles();
+            if let Some((x, y)) = display::verify(|fb| scene.draw(fb)) {
+                serial_println!("[lumen] stale pixel at {},{}: damage missed a region", x, y);
+            }
+            // The check is diagnostics, not compositing: keep it out of the
+            // frame budget it is measuring.
+            verify_cycles += arch::cycles() - started;
+        }
+
         // The compositor is the whole point of this kernel, so keep an eye on
         // what it actually costs. The busy share is what matters: frames per
         // second saturates at the tick rate long before the work stops growing.
         frames += 1;
         if now - fps_window >= 10 * arch::TICK_HZ as u64 {
             let secs = ticks_to_secs_f32(now - fps_window);
-            let elapsed = arch::cycles() - window_start;
+            let elapsed = (arch::cycles() - window_start).saturating_sub(verify_cycles);
             serial_println!(
                 "[lumen] {} fps, {}% busy",
                 (frames as f32 / secs) as u32,
@@ -182,6 +198,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             );
             frames = 0;
             busy_cycles = 0;
+            verify_cycles = 0;
             fps_window = now;
             window_start = arch::cycles();
         }
