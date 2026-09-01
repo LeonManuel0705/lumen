@@ -3,7 +3,7 @@ pub mod clock;
 
 use alloc::boxed::Box;
 
-use crate::gfx::Surface;
+use crate::gfx::{Rect, Surface};
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub enum AppKind {
@@ -24,6 +24,16 @@ pub struct AppInput {
 pub trait App {
     fn title(&self) -> &'static str;
     fn update(&mut self, dt: f32, input: &AppInput);
+
+    /// The region this app will paint into its surface this frame, in surface
+    /// coordinates, or `None` if the surface is unchanged since it was last
+    /// drawn. The compositor remembers where the app painted last time and
+    /// repaints both, so an app only has to describe the present.
+    ///
+    /// Reporting too small a rectangle leaves a stale smear on screen, so when
+    /// in doubt an app should claim more than it touches.
+    fn painted(&self) -> Option<Rect>;
+
     /// Apps that show wall time get it from the shell, which owns the RTC.
     fn set_clock(&mut self, _day_seconds: u32) {}
     fn draw(&self, surface: &mut Surface);
@@ -41,7 +51,7 @@ impl AppKind {
     pub fn spawn(self, width: usize, height: usize) -> Box<dyn App> {
         match self {
             AppKind::Ball => Box::new(ball::BallApp::new(width, height)),
-            AppKind::Clock => Box::new(clock::ClockApp::new()),
+            AppKind::Clock => Box::new(clock::ClockApp::new(width, height)),
         }
     }
 }

@@ -92,6 +92,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     scene.set_date(&date_buf[..date_len]);
     serial_println!("[lumen] baking wallpaper and glass cache");
     display::bake_background(|fb| scene.draw_background(fb));
+    // Nothing has ever been presented, so the first frame owes the whole screen.
+    scene.repaint_everything();
+    let mut previous_damage = gfx::Damage::new(width as i32, height as i32);
 
     serial_println!("[lumen] entering main loop");
 
@@ -100,6 +103,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let mut last_shown = day_base;
     let mut frames: u32 = 0;
     let mut fps_window = TICKS.load(Ordering::Relaxed);
+    let mut busy_cycles: u64 = 0;
+    let mut window_start = arch::cycles();
 
     loop {
         let now = TICKS.load(Ordering::Relaxed);
@@ -131,6 +136,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         last_shown = shown;
         scene.set_clock(shown);
 
+        let frame_start = arch::cycles();
         let real_input = input::snapshot();
         // Extra catch-up steps must not replay one-shot events, but they do
         // have to keep level state like a held mouse button: a drag lives
@@ -151,16 +157,33 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
         last_seen = now;
 
-        display::render(|fb| scene.draw(fb));
+        // A region is repainted if something will be drawn there now, or was
+        // drawn there last frame and has since moved on.
+        let damage = scene.finish_frame();
+        let mut repaint = damage;
+        repaint.add_all(&previous_damage);
+        previous_damage = damage;
+        if !repaint.is_empty() {
+            display::render(&repaint, |fb| scene.draw(fb));
+        }
+        busy_cycles += arch::cycles() - frame_start;
 
         // The compositor is the whole point of this kernel, so keep an eye on
-        // what it actually costs.
+        // what it actually costs. The busy share is what matters: frames per
+        // second saturates at the tick rate long before the work stops growing.
         frames += 1;
         if now - fps_window >= 10 * arch::TICK_HZ as u64 {
             let secs = ticks_to_secs_f32(now - fps_window);
-            serial_println!("[lumen] {} fps", (frames as f32 / secs) as u32);
+            let elapsed = arch::cycles() - window_start;
+            serial_println!(
+                "[lumen] {} fps, {}% busy",
+                (frames as f32 / secs) as u32,
+                busy_cycles * 100 / elapsed.max(1)
+            );
             frames = 0;
+            busy_cycles = 0;
             fps_window = now;
+            window_start = arch::cycles();
         }
 
         x86_64::instructions::interrupts::enable_and_hlt();

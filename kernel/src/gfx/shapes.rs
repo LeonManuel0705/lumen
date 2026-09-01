@@ -3,13 +3,14 @@ use super::{Canvas, Color};
 
 pub fn fill_rect<C: Canvas>(fb: &mut C, x: i32, y: i32, w: i32, h: i32, c: Color) {
     if w <= 0 || h <= 0 { return; }
-    let x0 = x.max(0) as usize;
-    let y0 = y.max(0) as usize;
-    let x1 = ((x + w).max(0) as usize).min(fb.width());
-    let y1 = ((y + h).max(0) as usize).min(fb.height());
+    let (cx0, cy0, cx1, cy1) = fb.bounds();
+    let x0 = x.max(cx0);
+    let y0 = y.max(cy0);
+    let x1 = (x + w).min(cx1);
+    let y1 = (y + h).min(cy1);
     if x1 <= x0 { return; }
     for py in y0..y1 {
-        fb.fill_row(x0, py, x1 - x0, c);
+        fb.fill_row(x0 as usize, py as usize, (x1 - x0) as usize, c);
     }
 }
 
@@ -44,25 +45,27 @@ pub fn corner_inset(ly: i32, h: i32, r: i32) -> i32 {
 
 pub fn vertical_gradient<C: Canvas>(fb: &mut C, top: Color, mid: Color, bottom: Color) {
     let h = fb.height().max(1);
-    let w = fb.width();
-    for y in 0..fb.height() {
-        let p = (y * 510) / h;
+    let (cx0, cy0, cx1, cy1) = fb.bounds();
+    if cx1 <= cx0 { return; }
+    for y in cy0.max(0)..cy1 {
+        let p = (y as usize * 510) / h;
         let row = if p <= 255 {
             Color::lerp(top, mid, p as u8)
         } else {
             Color::lerp(mid, bottom, (p - 255) as u8)
         };
-        fb.fill_row(0, y, w, row);
+        fb.fill_row(cx0 as usize, y as usize, (cx1 - cx0) as usize, row);
     }
 }
 
 pub fn fill_rounded_rect<C: Canvas>(fb: &mut C, x: i32, y: i32, w: i32, h: i32, r: i32, c: Color) {
     if w <= 0 || h <= 0 { return; }
     let r = r.max(0).min(w / 2).min(h / 2);
-    let x0 = x.max(0);
-    let y0 = y.max(0);
-    let x1 = (x + w).min(fb.width() as i32);
-    let y1 = (y + h).min(fb.height() as i32);
+    let (cx0, cy0, cx1, cy1) = fb.bounds();
+    let x0 = x.max(cx0);
+    let y0 = y.max(cy0);
+    let x1 = (x + w).min(cx1);
+    let y1 = (y + h).min(cy1);
 
     for py in y0..y1 {
         let ly = py - y;
@@ -105,8 +108,9 @@ pub fn stroke_circle<C: Canvas>(fb: &mut C, cx: i32, cy: i32, r: i32, thickness:
     let inner_sq = inner * inner;
     let outer_sq = outer * outer;
     let outer_i = outer as i32;
-    for py in (cy - outer_i - 1).max(0)..(cy + outer_i + 1).min(fb.height() as i32) {
-        for px in (cx - outer_i - 1).max(0)..(cx + outer_i + 1).min(fb.width() as i32) {
+    let (bx0, by0, bx1, by1) = fb.bounds();
+    for py in (cy - outer_i - 1).max(by0)..(cy + outer_i + 1).min(by1) {
+        for px in (cx - outer_i - 1).max(bx0)..(cx + outer_i + 1).min(bx1) {
             let cov = ring_coverage(px, py, cx, cy, inner, outer, inner_sq, outer_sq);
             if cov == 0 { continue; }
             let pixel = if cov == 255 { c } else { c.fade(cov) };
@@ -143,8 +147,9 @@ pub fn fill_ellipse<C: Canvas>(fb: &mut C, cx: i32, cy: i32, rx: i32, ry: i32, c
     let rx2 = rx as i64;
     let ry2 = ry as i64;
     let denom = rx2 * rx2 * ry2 * ry2;
-    for py in (cy - ry - 1).max(0)..(cy + ry + 1).min(fb.height() as i32) {
-        for px in (cx - rx - 1).max(0)..(cx + rx + 1).min(fb.width() as i32) {
+    let (bx0, by0, bx1, by1) = fb.bounds();
+    for py in (cy - ry - 1).max(by0)..(cy + ry + 1).min(by1) {
+        for px in (cx - rx - 1).max(bx0)..(cx + rx + 1).min(bx1) {
             let cov = ellipse_coverage(px, py, cx, cy, rx as i64, ry as i64, denom);
             if cov == 0 { continue; }
             let pixel = if cov == 255 { c } else { c.fade(cov) };
@@ -184,8 +189,9 @@ fn ellipse_coverage(px: i32, py: i32, cx: i32, cy: i32, rx: i64, ry: i64, denom:
 pub fn fill_circle<C: Canvas>(fb: &mut C, cx: i32, cy: i32, r: i32, c: Color) {
     if r <= 0 { return; }
     let r2 = r + 1;
-    for py in (cy - r2).max(0)..(cy + r2).min(fb.height() as i32) {
-        for px in (cx - r2).max(0)..(cx + r2).min(fb.width() as i32) {
+    let (bx0, by0, bx1, by1) = fb.bounds();
+    for py in (cy - r2).max(by0)..(cy + r2).min(by1) {
+        for px in (cx - r2).max(bx0)..(cx + r2).min(bx1) {
             let cov = circle_coverage(px, py, cx, cy, r);
             if cov == 0 { continue; }
             let pixel = if cov == 255 { c } else { c.fade(cov) };
@@ -229,8 +235,9 @@ pub fn draw_line<C: Canvas>(fb: &mut C, x0: i32, y0: i32, x1: i32, y1: i32, c: C
     let mut err = dx + dy;
     let mut x = x0;
     let mut y = y0;
+    let (bx0, by0, bx1, by1) = fb.bounds();
     loop {
-        if x >= 0 && y >= 0 && (x as usize) < fb.width() && (y as usize) < fb.height() {
+        if x >= bx0 && y >= by0 && x < bx1 && y < by1 {
             fb.paint(x as usize, y as usize, c);
         }
         if x == x1 && y == y1 { break; }
@@ -252,11 +259,12 @@ pub fn drop_shadow<C: Canvas>(fb: &mut C, x: i32, y: i32, w: i32, h: i32, r: i32
         return;
     }
 
+    let (cx0, cy0, cx1, cy1) = fb.bounds();
     let sy = y + DROP;
-    let x0 = (x - SPREAD).max(0);
-    let y0 = (sy - SPREAD).max(0);
-    let x1 = (x + w + SPREAD).min(fb.width() as i32);
-    let y1 = (sy + h + SPREAD).min(fb.height() as i32);
+    let x0 = (x - SPREAD).max(cx0);
+    let y0 = (sy - SPREAD).max(cy0);
+    let x1 = (x + w + SPREAD).min(cx1);
+    let y1 = (sy + h + SPREAD).min(cy1);
     let shade = |fx: u8, fy: u8| -> Color {
         let weight = color::mul255(fx, fy);
         Color::rgba(30, 60, 100, color::mul255(color::mul255(weight, weight), PEAK))
@@ -321,8 +329,9 @@ pub fn radial_glow<C: Canvas>(fb: &mut C, cx: i32, cy: i32, r: i32, inner: Color
     if r <= 0 { return; }
     let r64 = r as i64;
     let r_sq = r64 * r64;
-    for py in (cy - r).max(0)..(cy + r).min(fb.height() as i32) {
-        for px in (cx - r).max(0)..(cx + r).min(fb.width() as i32) {
+    let (bx0, by0, bx1, by1) = fb.bounds();
+    for py in (cy - r).max(by0)..(cy + r).min(by1) {
+        for px in (cx - r).max(bx0)..(cx + r).min(bx1) {
             let dx = (px - cx) as i64;
             let dy = (py - cy) as i64;
             let d_sq = dx * dx + dy * dy;
@@ -370,7 +379,8 @@ pub fn stroke_rounded_rect<C: Canvas>(fb: &mut C, x: i32, y: i32, w: i32, h: i32
     let r = r.max(0).min(w / 2).min(h / 2);
 
     let edge_pixel = |fb: &mut C, px: i32, py: i32| {
-        if px < 0 || py < 0 || px >= fb.width() as i32 || py >= fb.height() as i32 {
+        let (bx0, by0, bx1, by1) = fb.bounds();
+        if px < bx0 || py < by0 || px >= bx1 || py >= by1 {
             return;
         }
         let cov_in = rounded_coverage_signed(px - x, py - y, w, h, r, 0);

@@ -1,4 +1,4 @@
-use crate::gfx::{font_data, shapes, Canvas, Color, Surface};
+use crate::gfx::{font_data, shapes, Canvas, Color, Rect, Surface};
 use crate::widgets::{self, RollingClock};
 
 use super::{App, AppInput};
@@ -7,13 +7,17 @@ use super::{App, AppInput};
 pub struct ClockApp {
     clock: RollingClock,
     phase: f32,
+    width: i32,
+    height: i32,
 }
 
 impl ClockApp {
-    pub fn new() -> Self {
+    pub fn new(width: usize, height: usize) -> Self {
         Self {
             clock: RollingClock::new(&font_data::FONT_CLOCK, true),
             phase: 0.0,
+            width: width as i32,
+            height: height as i32,
         }
     }
 }
@@ -21,6 +25,20 @@ impl ClockApp {
 impl App for ClockApp {
     fn title(&self) -> &'static str {
         "Uhr"
+    }
+
+    /// Only the digits move: they roll, and the colon breathes. The label below
+    /// them is redrawn identically every frame and never needs repainting.
+    fn painted(&self) -> Option<Rect> {
+        let digit_h = self.clock.digit_height();
+        let baseline = self.height / 2 + digit_h / 2 - 8;
+        let half = self.clock.width() / 2 + 8;
+        Some(Rect::new(
+            self.width / 2 - half,
+            baseline - digit_h - digit_h,
+            self.width / 2 + half,
+            baseline + digit_h,
+        ))
     }
 
     fn set_clock(&mut self, day_seconds: u32) {

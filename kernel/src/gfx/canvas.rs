@@ -1,4 +1,4 @@
-use super::Color;
+use super::{Color, Rect};
 
 /// Anything the drawing primitives can paint into: the screen, an off-screen
 /// buffer, or a window's own surface. Keeping this one trait between the shapes
@@ -7,9 +7,24 @@ use super::Color;
 pub trait Canvas {
     fn width(&self) -> usize;
     fn height(&self) -> usize;
+
+    /// The region writes are allowed to land in. Primitives narrow their loops
+    /// to this so that repainting a small damaged area does not walk the whole
+    /// shape, and the pixel entry points enforce it so that a primitive which
+    /// forgets cannot corrupt the rest of the buffer.
+    fn clip(&self) -> Rect {
+        Rect::new(0, 0, self.width() as i32, self.height() as i32)
+    }
     fn put_pixel(&mut self, x: usize, y: usize, c: Color);
     fn blend_pixel(&mut self, x: usize, y: usize, c: Color);
     fn read_pixel(&self, x: usize, y: usize) -> Color;
+
+    /// The clip as loop bounds: `(x0, y0, x1, y1)`.
+    #[inline(always)]
+    fn bounds(&self) -> (i32, i32, i32, i32) {
+        let c = self.clip();
+        (c.x0, c.y0, c.x1, c.y1)
+    }
 
     fn paint(&mut self, x: usize, y: usize, c: Color) {
         if c.a == 255 {

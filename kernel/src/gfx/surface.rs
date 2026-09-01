@@ -67,16 +67,22 @@ impl Surface {
         if opacity == 0 {
             return;
         }
-        let x0 = x.max(0);
-        let y0 = y.max(0);
-        let x1 = (x + self.width as i32).min(dst.width() as i32);
-        let y1 = (y + self.height as i32).min(dst.height() as i32);
+        let (cx0, cy0, cx1, cy1) = dst.bounds();
+        let x0 = x.max(cx0);
+        let y0 = y.max(cy0);
+        let x1 = (x + self.width as i32).min(cx1);
+        let y1 = (y + self.height as i32).min(cy1);
+        // A clip can miss the surface in one axis while overlapping in the
+        // other, which leaves a negative run. That has to be caught before the
+        // row slice is cut, not after.
+        if x1 <= x0 || y1 <= y0 {
+            return;
+        }
 
+        let sx = (x0 - x) as usize;
+        let run = (x1 - x0) as usize;
         for py in y0..y1 {
-            let sy = (py - y) as usize;
-            let sx = (x0 - x) as usize;
-            let run = (x1 - x0) as usize;
-            let start = sy * self.width + sx;
+            let start = (py - y) as usize * self.width + sx;
             dst.blend_row(x0 as usize, py as usize, &self.pixels[start..start + run], opacity);
         }
     }
@@ -110,10 +116,14 @@ impl Surface {
         let origin_y = (center_y - out_h as f32 * 0.5) as i32;
 
         let step = ((1.0 / scale) * 65536.0) as i64;
-        let x0 = origin_x.max(0);
-        let y0 = origin_y.max(0);
-        let x1 = (origin_x + out_w).min(dst.width() as i32);
-        let y1 = (origin_y + out_h).min(dst.height() as i32);
+        let (cx0, cy0, cx1, cy1) = dst.bounds();
+        let x0 = origin_x.max(cx0);
+        let y0 = origin_y.max(cy0);
+        let x1 = (origin_x + out_w).min(cx1);
+        let y1 = (origin_y + out_h).min(cy1);
+        if x1 <= x0 || y1 <= y0 {
+            return;
+        }
 
         for py in y0..y1 {
             let sy = (((py - origin_y) as i64 * step) >> 16) as usize;
