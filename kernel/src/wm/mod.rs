@@ -4,6 +4,7 @@ use alloc::vec::Vec;
 use crate::anim::{easing, Spring, Tween};
 use crate::apps::{App, AppInput, AppKind};
 use crate::display::Frame;
+use crate::input::KeyBatch;
 use crate::gfx::{font_data, shapes, text, Canvas, Color, Damage, Rect, Surface};
 
 const TITLE_BAR: i32 = 38;
@@ -12,8 +13,9 @@ const CONTENT_INSET: i32 = 8;
 const OPEN_SECONDS: f32 = 0.42;
 const CLOSE_SECONDS: f32 = 0.24;
 const CLOSE_DOT: i32 = 11;
-/// The lowest a window may sit: clear of the shell's top bar.
 const TOP_BAR_FLOOR: f32 = 86.0;
+const CASCADE_STEP: (f32, f32) = (34.0, 30.0);
+const CASCADE_TRIES: usize = 6;
 
 pub struct Window {
     id: u32,
@@ -26,24 +28,15 @@ pub struct Window {
     height: i32,
     open: Tween,
     closing: Option<Tween>,
-    /// 0 at rest, 1 while the window is being carried around.
     lift: Spring,
-    /// Set for any frame where the window's whole presentation changes: it is
-    /// growing, shrinking, moving, or has just gained or lost focus.
     moved: bool,
-    /// Where the app said its content changed, in screen coordinates.
     content_damage: Rect,
-    /// Where the app painted the last time its surface was drawn, in surface
-    /// coordinates. The app describes only the present; remembering the past is
-    /// the compositor's job.
     last_ink: Rect,
     was_focused: bool,
     first_frame: bool,
 }
 
 impl Window {
-    /// Where the window sits right now, and how solid it is: entrance and exit
-    /// both work by scaling around the centre and fading.
     fn presentation(&self) -> (f32, u8) {
         let t = self.open.t();
         let scale = 0.86 + 0.14 * easing::ease_out_back(t);
@@ -51,8 +44,6 @@ impl Window {
         let Some(close) = &self.closing else {
             return (scale, (opacity * 255.0) as u8);
         };
-        // Closing continues from wherever the entrance had got to, so a window
-        // dismissed mid-entrance shrinks away instead of snapping to full size.
         let c = close.t();
         (
             scale * (1.0 - 0.12 * easing::ease_in_quad(c)),
@@ -60,8 +51,6 @@ impl Window {
         )
     }
 
-    /// A window nobody can see yet, because its entrance has not started, must
-    /// not be swallowing clicks meant for what is behind it.
     fn is_interactive(&self) -> bool {
         self.closing.is_none() && self.presentation().1 >= 8
     }
@@ -77,8 +66,6 @@ impl Window {
         ((cx - w as f32 * 0.5) as i32, (cy - h as f32 * 0.5) as i32, w, h)
     }
 
-    /// Hit areas are tested against the settled rectangle, not the animated
-    /// one: a window that is still growing should not dodge the pointer.
     fn hit_rect(&self) -> (i32, i32, i32, i32) {
         (self.x as i32, self.y as i32, self.width, self.height)
     }
@@ -111,7 +98,6 @@ impl Window {
         )
     }
 
-    /// Everything the window paints, shadow included.
     fn painted(&self) -> Rect {
         let (x, y, w, h) = self.frame_rect();
         Rect::from_size(x, y, w, h).union(&shapes::shadow_bounds(x, y, w, h))
@@ -119,7 +105,6 @@ impl Window {
 }
 
 pub struct WindowManager {
-    /// Back to front: the last window is the focused one.
     windows: Vec<Window>,
     dragging: Option<(u32, f32, f32)>,
     next_id: u32,
@@ -142,8 +127,6 @@ impl WindowManager {
             .position(|w| w.kind == kind && w.closing.is_none())
     }
 
-    /// Opens an app, or raises it if a window of that app is already up. The
-    /// delay lets a boot sequence stagger its windows.
     pub fn open(&mut self, kind: AppKind, x: f32, y: f32, delay: f32) {
         if let Some(idx) = self.index_of_kind(kind) {
             let win = self.windows.remove(idx);
@@ -156,6 +139,19 @@ impl WindowManager {
         let height = ch as i32 + TITLE_BAR + CONTENT_INSET;
         let id = self.next_id;
         self.next_id += 1;
+
+        let (mut x, mut y) = (x, y);
+        for _ in 0..CASCADE_TRIES {
+            let taken = self
+                .windows
+                .iter()
+                .any(|w| (w.x - x).abs() < 12.0 && (w.y - y).abs() < 12.0);
+            if !taken {
+                break;
+            }
+            x += CASCADE_STEP.0;
+            y += CASCADE_STEP.1;
+        }
 
         self.windows.push(Window {
             id,
@@ -184,9 +180,6 @@ impl WindowManager {
         }
     }
 
-    /// The window that owns focus: the topmost one that is not closing. A
-    /// window playing its close animation is still on screen but is nobody's
-    /// keyboard target any more.
     fn focused_id(&self) -> Option<u32> {
         self.windows
             .iter()
@@ -195,9 +188,6 @@ impl WindowManager {
             .map(|w| w.id)
     }
 
-    /// Routes a press to the topmost window under the pointer: close button
-    /// first, then the title bar to start a drag, and anything else goes to the
-    /// app. Returns false when the press missed every window.
     fn press(&mut self, px: f32, py: f32) -> bool {
         let Some(idx) = self
             .windows
@@ -220,14 +210,30 @@ impl WindowManager {
         true
     }
 
+    pub fn close_focused(&mut self) {
+        if let Some(win) = self.windows.iter_mut().rev().find(|w| w.closing.is_none()) {
+            win.closing = Some(Tween::new(CLOSE_SECONDS, 0.0));
+            crate::serial_println!("[wm] window {} closing", win.id);
+        }
+    }
+
+    pub fn cycle_focus(&mut self) {
+        if self.windows.len() < 2 {
+            return;
+        }
+        if let Some(idx) = self.windows.iter().position(|w| w.closing.is_none()) {
+            let win = self.windows.remove(idx);
+            self.windows.push(win);
+        }
+    }
+
     pub fn update(
         &mut self,
         dt: f32,
         cursor: (f32, f32),
         just_pressed: bool,
         held: bool,
-        space: bool,
-        reset: bool,
+        keys: &KeyBatch,
     ) -> bool {
         let mut consumed = false;
         if just_pressed {
@@ -243,8 +249,6 @@ impl WindowManager {
                 let max_x = (sw - win.width as f32 * 0.4).max(0.0);
                 let max_y = (sh - TITLE_BAR as f32 - 8.0).max(TOP_BAR_FLOOR);
                 win.x = (cursor.0 - grab_x).clamp(-win.width as f32 * 0.6, max_x);
-                // Never let the title bar hide behind the shell's own top bar,
-                // where it would still be hit-tested but no longer visible.
                 win.y = (cursor.1 - grab_y).clamp(TOP_BAR_FLOOR, max_y);
             }
         }
@@ -268,8 +272,6 @@ impl WindowManager {
                 continue;
             }
 
-            // Anything that changes the window as a whole: the entrance still
-            // running, a drag, the settling lift, or the focus tint flipping.
             win.moved = win.moved
                 || win.first_frame
                 || focused != win.was_focused
@@ -288,9 +290,7 @@ impl WindowManager {
             let input = AppInput {
                 cursor: local,
                 clicked: just_pressed && inside && focused,
-                focused,
-                space,
-                reset,
+                keys: if focused { keys } else { &KeyBatch::EMPTY },
             };
             win.app.update(dt, &input);
             if win.moved {
@@ -303,9 +303,6 @@ impl WindowManager {
         consumed
     }
 
-    /// Redraws the surface of every window whose app painted something new.
-    /// This runs once per frame, after the last simulation substep: physics may
-    /// need several steps to stay stable, but only the final state is ever seen.
     pub fn render_surfaces(&mut self) {
         for win in self.windows.iter_mut() {
             if win.closing.is_some() {
@@ -325,12 +322,6 @@ impl WindowManager {
             let changed = ink.union(&win.last_ink).intersect(&full);
             win.last_ink = ink;
 
-            // The compositor owns the surface lifecycle: an app always draws
-            // onto a blank slate and never has to think about the frame before.
-            // The clear ignores the clip on purpose, because it is what makes
-            // the slate; everything after it honours the clip, which matters
-            // most for round_corners, since that multiplies alpha in place and
-            // would fade the corners away if it ran twice over a pixel.
             win.surface.clear_rect(changed, Color::TRANSPARENT);
             win.surface.set_clip(changed);
             win.app.draw(&mut win.surface);
@@ -343,8 +334,6 @@ impl WindowManager {
         }
     }
 
-    /// Adds every window's changed region to this frame's damage, and forgets
-    /// it: damage describes one frame only.
     pub fn damage_into(&mut self, into: &mut Damage) {
         for win in self.windows.iter_mut() {
             if !win.content_damage.is_empty() {
@@ -355,8 +344,6 @@ impl WindowManager {
         }
     }
 
-    /// Drops the accumulated damage without repainting it, for the modes where
-    /// the shell repaints the whole screen anyway.
     pub fn forget_damage(&mut self) {
         for win in self.windows.iter_mut() {
             win.content_damage = Rect::EMPTY;
@@ -368,7 +355,6 @@ impl WindowManager {
         let clip = frame.clip();
         let focused_id = self.focused_id();
         for win in &self.windows {
-            // Nothing of this window lands in the region being repainted.
             if !win.painted().intersects(&clip) {
                 continue;
             }
@@ -392,7 +378,6 @@ impl WindowManager {
         frame.glass_fill(x, y, w, h, radius, Color::LUMEN_CARD.with_alpha(tint), opacity);
         shapes::glass_highlights(frame, x, y, w, h, radius, fade(255));
 
-        // Title bar: a hairline under it, the close dot, and the app's name.
         let bar_h = (TITLE_BAR as f32 * scale) as i32;
         shapes::fill_rect(
             frame,

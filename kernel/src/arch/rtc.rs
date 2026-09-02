@@ -45,8 +45,6 @@ fn decode_date((d, m, y, status_b): (u8, u8, u8, u8)) -> Date {
     }
 }
 
-// Blocks until the RTC second rolls over (up to ~1s), so the returned time is
-// sampled at a known second boundary. Boot-time only; too slow for the frame loop.
 pub fn read_at_edge() -> Time {
     let start = reg(0x00);
     for _ in 0..2_000_000 {

@@ -8,8 +8,6 @@ use x86_64::VirtAddr;
 
 pub use frame::BootFrameAllocator;
 
-/// Builds the page-table view of physical memory the bootloader handed us and
-/// brings the kernel heap online. Everything after this point may allocate.
 pub fn init(boot_info: &BootInfo) -> Result<(), &'static str> {
     let offset = boot_info
         .physical_memory_offset
@@ -32,10 +30,6 @@ pub fn init(boot_info: &BootInfo) -> Result<(), &'static str> {
     Ok(())
 }
 
-/// Exercises the allocator once at boot: fills the heap with a mixed pattern of
-/// live and freed blocks, then drops everything and checks that coalescing put
-/// the heap back together as one block. A kernel that silently fragments its
-/// only heap is much harder to debug later than a loud failure here.
 pub fn selftest() {
     use alloc::vec::Vec;
 
@@ -52,7 +46,6 @@ pub fn selftest() {
             if i % 2 == 0 { keep.push(block) } else { drop_soon.push(block) }
         }
         drop(drop_soon);
-        // The holes left behind must be reusable, not just accounted for.
         let big = alloc::vec![7u8; 512 * 1024];
         for (i, block) in keep.iter().enumerate() {
             let tag = (i * 2) as u8;
@@ -82,9 +75,6 @@ pub fn selftest() {
     }
 }
 
-/// # Safety
-/// The caller must guarantee that all physical memory is mapped at
-/// `phys_offset` and that no other `OffsetPageTable` is alive at the same time.
 unsafe fn active_page_table(phys_offset: VirtAddr) -> OffsetPageTable<'static> {
     use x86_64::registers::control::Cr3;
 
