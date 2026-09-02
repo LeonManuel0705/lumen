@@ -29,8 +29,6 @@ use crate::scene::Scene;
 
 static BOOT_CONFIG: BootloaderConfig = {
     let mut config = BootloaderConfig::new_default();
-    // The heap needs to build page tables, which needs to reach physical
-    // memory through a mapping the bootloader sets up for us.
     config.mappings.physical_memory = Some(Mapping::Dynamic);
     config.kernel_stack_size = 256 * 1024;
     config
@@ -92,15 +90,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     scene.set_date(&date_buf[..date_len]);
     serial_println!("[lumen] baking wallpaper and glass cache");
     display::bake_background(|fb| scene.draw_background(fb));
-    // Nothing has ever been presented, so the first frame owes the whole screen.
     scene.repaint_everything();
     let mut previous_damage = gfx::Damage::new(width as i32, height as i32);
 
     serial_println!("[lumen] entering main loop");
 
-    // How often the compositor checks its own work. A missed damage region is
-    // silent by nature, so it is worth a full redraw every couple of seconds to
-    // find out. Set to 0 to turn the check off.
     const VERIFY_EVERY: u32 = 120;
 
     let dt = 1.0 / arch::TICK_HZ as f32;
@@ -120,8 +114,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             continue;
         }
 
-        // VM pauses and host sleep silently stop the PIT while the RTC keeps
-        // tracking wall time, so rebase on the RTC when they disagree.
         if now - last_sync >= 300 * arch::TICK_HZ as u64 {
             last_sync = now;
             let t = arch::rtc::read();
@@ -144,16 +136,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
         let frame_start = arch::cycles();
         let real_input = input::snapshot();
-        // Extra catch-up steps must not replay one-shot events, but they do
-        // have to keep level state like a held mouse button: a drag lives
-        // across every substep of the frame it started in.
         let carry = Snapshot {
             mouse_dx: 0,
             mouse_dy: 0,
             buttons: real_input.buttons,
             buttons_just_pressed: 0,
-            key_pressed_space: false,
-            key_pressed_r: false,
+            keys: input::KeyBatch::EMPTY,
         };
         let mut applied = false;
         while steps > 0 {
@@ -163,8 +151,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
         last_seen = now;
 
-        // A region is repainted if something will be drawn there now, or was
-        // drawn there last frame and has since moved on.
         let damage = scene.finish_frame();
         let mut repaint = damage;
         repaint.add_all(&previous_damage);
@@ -179,14 +165,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             if let Some((x, y)) = display::verify(|fb| scene.draw(fb)) {
                 serial_println!("[lumen] stale pixel at {},{}: damage missed a region", x, y);
             }
-            // The check is diagnostics, not compositing: keep it out of the
-            // frame budget it is measuring.
             verify_cycles += arch::cycles() - started;
         }
 
-        // The compositor is the whole point of this kernel, so keep an eye on
-        // what it actually costs. The busy share is what matters: frames per
-        // second saturates at the tick rate long before the work stops growing.
         frames += 1;
         if now - fps_window >= 10 * arch::TICK_HZ as u64 {
             let secs = ticks_to_secs_f32(now - fps_window);
@@ -217,8 +198,6 @@ fn day_seconds(t: &arch::rtc::Time) -> u32 {
     t.hours as u32 * 3600 + t.minutes as u32 * 60 + t.seconds as u32
 }
 
-// The PIT runs at PIT_BASE_FREQ/divisor, not exactly TICK_HZ; dividing ticks
-// by TICK_HZ would gain ~1.6s/day.
 fn ticks_to_secs_f32(ticks: u64) -> f32 {
     ticks as f32 * arch::pit::divisor_for(arch::TICK_HZ) as f32 / arch::pit::PIT_BASE_FREQ as f32
 }

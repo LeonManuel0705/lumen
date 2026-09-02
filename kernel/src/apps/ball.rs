@@ -1,5 +1,6 @@
 use crate::anim::Spring;
 use crate::gfx::{shapes, Color, Rect, Surface};
+use crate::input::Key;
 
 use super::{App, AppInput};
 
@@ -9,8 +10,6 @@ const RADIUS: f32 = 24.0;
 const WALL_DAMPING: f32 = 0.88;
 const FLOOR_DAMPING: f32 = 0.84;
 
-/// The bouncing ball that has been Lumen's animation testbed since phase two,
-/// now living inside a window instead of owning the whole screen.
 pub struct BallApp {
     width: f32,
     height: f32,
@@ -42,8 +41,6 @@ impl BallApp {
         }
     }
 
-    /// Everything the ball puts on the surface: the trail, the ball itself,
-    /// and the shadow on the floor below it, generously inflated.
     fn ink(&self) -> Rect {
         let mut r = Rect::new(i32::MAX, i32::MAX, i32::MIN, i32::MIN);
         for (tx, ty) in self.trail.iter() {
@@ -56,11 +53,8 @@ impl BallApp {
         r.y0 = r.y0.min(self.y as i32);
         r.x1 = r.x1.max(self.x as i32);
         r.y1 = r.y1.max(self.y as i32);
-        // The widest thing drawn is the outer glow at 1.18x the radius, times
-        // the pulse spring's ceiling, plus a pixel of antialiasing.
         let pad = (RADIUS * 1.18 * 1.4) as i32 + 3;
         let r = r.expand(pad);
-        // The shadow only reaches as wide as the ball itself, on the floor.
         let shadow_half = (RADIUS * 1.3) as i32 + 4;
         let floor = Rect::new(
             self.x as i32 - shadow_half,
@@ -89,13 +83,12 @@ impl App for BallApp {
         Some(self.ink())
     }
 
-    fn update(&mut self, dt: f32, input: &AppInput) {
-        if input.focused && input.reset {
+    fn update(&mut self, dt: f32, input: &AppInput<'_>) {
+        if input.keys.pressed(Key::Char('r')) {
             self.reset();
         }
 
         if input.clicked {
-            // Throw the ball away from the click, hardest when it lands on it.
             let dx = input.cursor.0 - self.x;
             let dy = input.cursor.1 - self.y;
             let len_sq = dx * dx + dy * dy;
@@ -108,7 +101,7 @@ impl App for BallApp {
             }
         }
 
-        if input.focused && input.space {
+        if input.keys.pressed(Key::Space) {
             self.vy = -640.0;
             self.vx += crate::rng::sign() * 80.0;
             self.squash.nudge(-10.0);
@@ -134,7 +127,6 @@ impl App for BallApp {
         if self.y + RADIUS > self.height {
             self.y = self.height - RADIUS;
             if self.vy.abs() < 60.0 {
-                // Never let it settle: a still ball is a boring window.
                 self.vy = -460.0;
                 self.vx += crate::rng::sign() * 80.0;
             } else {
@@ -159,7 +151,6 @@ impl App for BallApp {
     }
 
     fn draw(&self, surface: &mut Surface) {
-        // A hint of a room: brighter at the floor, with a line to bounce on.
         shapes::vertical_gradient(
             surface,
             Color::rgba(255, 255, 255, 16),

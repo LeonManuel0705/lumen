@@ -10,9 +10,6 @@ pub struct RollingClock {
     chars: [u8; 8],
     prev: [u8; 8],
     anim: [f32; 8],
-    /// Cells that moved at any point this frame. A roll that finishes still
-    /// changes the pixels on the frame it finishes, and the cell is no longer
-    /// animating by the time anyone asks, so it has to be remembered.
     moved_this_frame: [bool; 8],
 }
 
@@ -32,8 +29,6 @@ impl RollingClock {
         if self.show_seconds { 8 } else { 5 }
     }
 
-    /// Called once per frame by the shell, which is what makes it the right
-    /// place to open a new frame's worth of movement bookkeeping.
     pub fn set(&mut self, day_seconds: u32) {
         self.moved_this_frame = [false; 8];
         let h = (day_seconds / 3600) % 24;
@@ -78,9 +73,6 @@ impl RollingClock {
         self.font.glyph('0').map(|g| g.h as i32).unwrap_or(20)
     }
 
-    /// The pixels that differ from the last frame: the colons, which breathe
-    /// every frame, plus any digit still rolling. Walks the same pen the
-    /// drawing does, so the two cannot drift apart.
     pub fn changed_rect(&self, center_x: i32, baseline: i32) -> Rect {
         if self.chars[0] == 0 {
             return Rect::EMPTY;

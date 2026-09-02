@@ -2,8 +2,6 @@ use x86_64::instructions::port::Port;
 
 pub const PIT_BASE_FREQ: u32 = 1_193_182;
 
-// The PIT can only approximate a frequency through an integer divisor; callers
-// converting ticks to seconds must use this same divisor for exact math.
 pub const fn divisor_for(hz: u32) -> u32 {
     let hz = if hz == 0 { 1 } else { hz };
     let d = PIT_BASE_FREQ / hz;

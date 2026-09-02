@@ -1,4 +1,3 @@
-/// A half-open rectangle in screen pixels: `x0..x1` by `y0..y1`.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub struct Rect {
     pub x0: i32,
@@ -49,8 +48,6 @@ impl Rect {
         }
     }
 
-    /// The smallest rectangle containing both. An empty operand is ignored, so
-    /// this can be folded over a list that starts out empty.
     pub fn union(&self, other: &Rect) -> Rect {
         if self.is_empty() {
             return *other;

@@ -3,8 +3,6 @@ use alloc::vec::Vec;
 
 use super::{Canvas, Color, Rect};
 
-/// An off-screen RGBA buffer on the heap. Unlike the screen it keeps alpha, so
-/// a window can be drawn once and composited translucent, faded, or scaled.
 pub struct Surface {
     width: usize,
     height: usize,
@@ -30,13 +28,6 @@ impl Surface {
         self.clip = rect.intersect(&self.full_rect());
     }
 
-    /// Fades out the alpha in the corners so window content follows the shape
-    /// of the frame it sits in instead of poking out of it.
-    ///
-    /// This multiplies alpha in place, so it must run exactly once over any
-    /// pixel per redraw. It therefore honours the clip: a pixel outside the
-    /// region being redrawn was already rounded when it was last drawn, and
-    /// rounding it again would fade the corners away over a few seconds.
     pub fn round_corners(&mut self, radius: i32, top: bool, bottom: bool) {
         if radius <= 0 {
             return;
@@ -65,10 +56,6 @@ impl Surface {
         }
     }
 
-    /// Hard-overwrites a region. Blending would fold this frame into the last
-    /// one, so a surface has to be cleared, not painted over. Deliberately
-    /// ignores the clip: this is what makes the clean slate the clip then
-    /// confines the redraw to.
     pub fn clear_rect(&mut self, rect: Rect, c: Color) {
         let rect = rect.intersect(&self.full_rect());
         if rect.is_empty() {
@@ -86,8 +73,6 @@ impl Surface {
         self.pixels[y * self.width + x]
     }
 
-    /// Composites the surface onto `dst` with its top-left at (`x`, `y`),
-    /// scaling every pixel's alpha by `opacity`.
     pub fn blit<C: Canvas>(&self, dst: &mut C, x: i32, y: i32, opacity: u8) {
         if opacity == 0 {
             return;
@@ -97,9 +82,6 @@ impl Surface {
         let y0 = y.max(cy0);
         let x1 = (x + self.width as i32).min(cx1);
         let y1 = (y + self.height as i32).min(cy1);
-        // A clip can miss the surface in one axis while overlapping in the
-        // other, which leaves a negative run. That has to be caught before the
-        // row slice is cut, not after.
         if x1 <= x0 || y1 <= y0 {
             return;
         }
@@ -112,9 +94,6 @@ impl Surface {
         }
     }
 
-    /// Composites the surface scaled around its own centre, which is how
-    /// windows grow into place and fold away again. Nearest sampling in 16.16
-    /// fixed point: it only runs while something is in motion.
     pub fn blit_scaled<C: Canvas>(
         &self,
         dst: &mut C,

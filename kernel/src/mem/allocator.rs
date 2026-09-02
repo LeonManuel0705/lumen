@@ -2,15 +2,10 @@ use core::alloc::{GlobalAlloc, Layout};
 use core::ptr;
 use spin::Mutex;
 
-/// Every block boundary in the heap sits on this alignment, so a split
-/// remainder is always a legal place for a `FreeNode`.
 const GRAIN: usize = 16;
 const HEADER: usize = core::mem::size_of::<Header>();
 const MIN_BLOCK: usize = 32;
 
-/// Written immediately below every live allocation. It records the whole block
-/// the allocation came out of, including the padding that alignment forced in
-/// front of the payload, so `dealloc` can give all of it back.
 #[repr(C)]
 struct Header {
     start: usize,
@@ -24,7 +19,6 @@ struct FreeNode {
 }
 
 struct Heap {
-    /// Free blocks, sorted by address so neighbours can be merged on free.
     head: *mut FreeNode,
     used: usize,
     peak: usize,
@@ -58,9 +52,6 @@ impl LumenAllocator {
         }
     }
 
-    /// # Safety
-    /// `start..start + size` must be mapped, writable, and untouched by anyone
-    /// else for the rest of the kernel's life.
     pub unsafe fn init(&self, start: usize, size: usize) {
         let mut heap = self.heap.lock();
         let aligned = align_up(start, GRAIN);
@@ -117,8 +108,6 @@ unsafe impl GlobalAlloc for LumenAllocator {
             let block_start = node as usize;
             let block_end = block_start + (*node).size;
             let payload = align_up(block_start + HEADER, align);
-            // Reserve a byte even for a zero-sized request, so the returned
-            // pointer can never land on the free node that follows it.
             let alloc_end = align_up(payload + layout.size().max(1), GRAIN);
 
             if alloc_end <= block_end {
