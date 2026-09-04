@@ -22,6 +22,8 @@ impl<'a> Framebuffer<'a> {
 
     pub fn from_raw(buf: &'a mut [u8], info: FrameBufferInfo) -> Self {
         let stride_bytes = info.stride * info.bytes_per_pixel;
+        // The buffer may be shorter than the mode (display.rs clamps to MAX_BYTES);
+        // never expose rows the slice can't back.
         let max_rows = if stride_bytes == 0 { 0 } else { buf.len() / stride_bytes };
         let width = info.width;
         let height = info.height.min(max_rows);
@@ -36,10 +38,14 @@ impl<'a> Framebuffer<'a> {
         }
     }
 
+    /// Confines every later write to `rect`, intersected with the buffer.
     pub fn set_clip(&mut self, rect: Rect) {
         self.clip = rect.intersect(&Rect::new(0, 0, self.width as i32, self.height as i32));
     }
 
+    /// Trims a horizontal run to the clip. Returns the surviving start, its
+    /// length, and how many pixels were dropped off the front, which callers
+    /// with a source buffer need in order to stay in step.
     #[inline(always)]
     fn clip_run(&self, x: usize, y: usize, len: usize) -> Option<(usize, usize, usize)> {
         let row = y as i64;
@@ -210,6 +216,8 @@ fn encode(slot: &mut [u8], fmt: PixelFormat, c: Color) {
         PixelFormat::U8  => {
             slot[0] = ((c.r as u16 * 30 + c.g as u16 * 59 + c.b as u16 * 11) / 100) as u8;
         }
+        // Unknown formats are guessed at as BGR, which is what every device
+        // this kernel has met uses. Never past the end of the slot, though.
         _ if slot.len() >= 3 => { slot[0] = c.b; slot[1] = c.g; slot[2] = c.r; }
         _ => {}
     }

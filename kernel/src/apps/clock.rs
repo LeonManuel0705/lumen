@@ -3,6 +3,7 @@ use crate::widgets::{self, RollingClock};
 
 use super::{App, AppInput};
 
+/// The top bar's rolling clock, given a window of its own with the seconds on.
 pub struct ClockApp {
     clock: RollingClock,
     phase: f32,
@@ -26,6 +27,8 @@ impl App for ClockApp {
         "Uhr"
     }
 
+    /// Only the digits move: they roll, and the colon breathes. The label below
+    /// them is redrawn identically every frame and never needs repainting.
     fn painted(&self) -> Option<Rect> {
         let digit_h = self.clock.digit_height();
         let baseline = self.height / 2 + digit_h / 2 - 8;

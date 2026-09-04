@@ -75,6 +75,8 @@ unsafe fn wait_read() {
     crate::serial_println!("[ps2] timeout waiting for controller data");
 }
 
+// Reads only bytes coming from the mouse (AUX status bit set), discarding any
+// keyboard scancodes queued during boot so they can't desync the handshake.
 unsafe fn read_aux_with_timeout() -> Option<u8> {
     let mut status: Port<u8> = Port::new(STATUS_CMD);
     let mut data: Port<u8> = Port::new(DATA);

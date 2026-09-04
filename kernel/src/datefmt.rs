@@ -9,6 +9,7 @@ const MONTHS: [&str; 12] = [
     "Juli", "August", "September", "Oktober", "November", "Dezember",
 ];
 
+// Sakamoto's algorithm; returns 0 = Sunday.
 fn weekday(y: u32, m: u32, d: u32) -> usize {
     const T: [u32; 12] = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
     let y = if m < 3 { y - 1 } else { y };
