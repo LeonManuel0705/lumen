@@ -1,8 +1,13 @@
 use pc_keyboard::{layouts, DecodedKey, HandleControl, KeyCode, KeyState, Keyboard, ScancodeSet1};
 use spin::{Lazy, Mutex};
 
+/// How many keystrokes may pile up between frames. The main loop drains this
+/// every frame at 60 Hz, so it only fills if a frame stalls badly, and dropping
+/// the newest keystroke is better than losing the order of the older ones.
 const QUEUE: usize = 32;
 
+/// The most keystrokes one frame will act on. A frame that sees more than this
+/// is one where the machine was not keeping up anyway.
 pub const MAX_FRAME_KEYS: usize = 12;
 
 #[derive(Copy, Clone, Default, PartialEq, Eq)]
@@ -12,6 +17,8 @@ pub struct Mods {
     pub alt: bool,
 }
 
+/// What a key means, independent of the character it happens to type. Letters
+/// are normalised to lower case so a shortcut never has to think about shift.
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub enum Key {
     Char(char),
@@ -30,6 +37,10 @@ pub enum Key {
 #[derive(Copy, Clone)]
 pub struct KeyEvent {
     pub key: Key,
+    /// The character this keystroke types, with shift applied. `None` for keys
+    /// that produce no text, which is what separates a shortcut from typing.
+    /// Nothing reads this yet; it is here so the first app that wants typed
+    /// input does not have to reopen the driver.
     #[allow(dead_code)]
     pub text: Option<char>,
     pub pressed: bool,
@@ -45,6 +56,7 @@ impl KeyEvent {
     };
 }
 
+/// One frame's worth of keystrokes, in the order they were typed.
 #[derive(Copy, Clone)]
 pub struct KeyBatch {
     events: [KeyEvent; MAX_FRAME_KEYS],
@@ -61,6 +73,7 @@ impl KeyBatch {
         self.events[..self.len].iter()
     }
 
+    /// True if this key went down during the frame.
     pub fn pressed(&self, key: Key) -> bool {
         self.iter().any(|e| e.pressed && e.key == key)
     }
@@ -93,6 +106,8 @@ static STATE: Lazy<Mutex<State>> = Lazy::new(|| {
     })
 });
 
+// Force the Lazy before interrupts are enabled, so its one-time init can never
+// race an IRQ landing mid-initialization.
 pub fn init() {
     Lazy::force(&STATE);
 }
@@ -112,6 +127,8 @@ pub fn process_byte(scancode: u8) {
         _ => {}
     }
 
+    // The decoder only produces text for a press, so a release still has to be
+    // classified from the raw code.
     let text = match s.kbd.process_keyevent(event) {
         Some(DecodedKey::Unicode(c)) if !c.is_control() => Some(c),
         _ => None,

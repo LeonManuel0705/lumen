@@ -1,3 +1,6 @@
+/// `a * b / 255`, exactly, without the divide. The compositor does this a few
+/// million times a second, and division is the one thing an emulated CPU is
+/// really bad at.
 #[inline(always)]
 pub fn mul255(a: u8, b: u8) -> u8 {
     let t = a as u32 * b as u32 + 128;
@@ -40,6 +43,7 @@ impl Color {
         Self { a, ..self }
     }
 
+    /// Scales the colour's own alpha, which is what fading and coverage do.
     #[inline(always)]
     pub fn fade(self, factor: u8) -> Self {
         Self { a: mul255(self.a, factor), ..self }
@@ -60,6 +64,8 @@ impl Color {
         }
     }
 
+    /// Source-over onto an opaque destination: the result is opaque, which is
+    /// what the screen wants.
     pub fn over(self, dst: Color) -> Color {
         if self.a == 255 { return self; }
         if self.a == 0   { return dst; }
@@ -75,6 +81,9 @@ impl Color {
     }
 
     #[allow(dead_code)]
+    /// Source-over that keeps the destination's own transparency. Window
+    /// surfaces need this: a translucent panel drawn into an empty surface has
+    /// to stay translucent so the compositor can see through it later.
     pub fn over_straight(self, dst: Color) -> Color {
         if self.a == 255 || dst.a == 0 { return self; }
         if self.a == 0 { return dst; }

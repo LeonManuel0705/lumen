@@ -59,6 +59,8 @@ pub fn print(args: fmt::Arguments) {
     });
 }
 
+// Fatal paths only (panic/fault handlers): steals the lock so a handler can
+// always print, even if the interrupted code held it.
 pub fn force_print(args: fmt::Arguments) {
     unsafe {
         SERIAL.force_unlock();

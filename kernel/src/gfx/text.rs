@@ -34,6 +34,7 @@ pub fn draw_char<C: Canvas>(fb: &mut C, font: &Font, c: char, x: i32, baseline_y
         let x0 = x + g.xmin as i32;
         let y0 = baseline_y - g.ymin as i32 - g.h as i32;
         let (cx0, cy0, cx1, cy1) = fb.bounds();
+        // Skip whole glyph rows outside the clip rather than testing per pixel.
         if x0 >= cx1 || y0 >= cy1 || x0 + g.w as i32 <= cx0 || y0 + g.h as i32 <= cy0 {
             return g.advance as i32;
         }
