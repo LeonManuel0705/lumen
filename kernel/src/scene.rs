@@ -61,6 +61,9 @@ pub struct Scene {
     damage: Damage,
     /// Where the cursor was drawn last, so a still cursor costs nothing.
     last_cursor: (i32, i32),
+    /// The colour it was drawn in, which the dock can change without the
+    /// cursor moving a pixel.
+    last_tint: Color,
     /// Set when the date string changes, which is otherwise pixel-identical
     /// from one frame to the next.
     date_dirty: bool,
@@ -96,6 +99,7 @@ impl Scene {
             dock: Dock::new(width as i32, height as i32),
             damage: Damage::new(width as i32, height as i32),
             last_cursor: (mid_x as i32, mid_y as i32),
+            last_tint: Color::LUMEN_ACCENT,
             date_dirty: true,
         }
     }
@@ -115,6 +119,11 @@ impl Scene {
 
     pub fn repaint_everything(&mut self) {
         self.damage.mark_all();
+    }
+
+    /// Over the dock the cursor picks up the colour of the icon under it.
+    fn cursor_tint(&self) -> Color {
+        self.dock.hover_tint().unwrap_or(Color::LUMEN_ACCENT)
     }
 
     fn cursor_rect_at(at: (i32, i32)) -> Rect {
@@ -321,10 +330,12 @@ impl Scene {
         // that can stay still for a frame has to carry its own history, because
         // the frame-to-frame union only covers what was repainted last frame.
         let now = (self.cursor_x.current as i32, self.cursor_y.current as i32);
-        if now != self.last_cursor {
+        let tint = self.cursor_tint();
+        if now != self.last_cursor || tint != self.last_tint {
             self.damage.add(Self::cursor_rect_at(self.last_cursor));
             self.damage.add(Self::cursor_rect_at(now));
             self.last_cursor = now;
+            self.last_tint = tint;
         }
 
         for r in &self.ripples {
@@ -520,8 +531,7 @@ impl Scene {
 
         let cx = self.cursor_x.current as i32;
         let cy = self.cursor_y.current as i32;
-        // Over the dock the cursor picks up the colour of the icon under it.
-        let tint = self.dock.hover_tint().unwrap_or(Color::LUMEN_ACCENT);
+        let tint = self.cursor_tint();
         shapes::fill_circle(fb, cx, cy, 22, tint.with_alpha(35));
         shapes::fill_circle(fb, cx, cy, 14, tint.with_alpha(110));
         shapes::fill_circle(fb, cx, cy, 7,  Color::WHITE.with_alpha(220));

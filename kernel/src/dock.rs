@@ -67,6 +67,11 @@ pub enum DockAction {
 /// quite reach their target, but the moment one is within half a pixel of it
 /// this signature stops changing, so an idle dock reports no damage without a
 /// single epsilon anywhere.
+///
+/// That only holds if the values are rounded, not truncated. The rest
+/// geometry lands on exact integers, so truncation would turn the sign of a
+/// spring that has decayed to a millionth into a whole pixel every time it
+/// rings through zero.
 #[derive(Copy, Clone, PartialEq, Eq, Default)]
 struct SlotVisual {
     live: bool,
@@ -76,14 +81,26 @@ struct SlotVisual {
     h: i32,
     alpha: u8,
     emblem: u8,
+    floor_y: i32,
     shadow_rx: i32,
     shadow_ry: i32,
     shadow_a: u8,
     ring_a: u8,
     dim: u8,
+    ind_y: i32,
     ind_x: i32,
     ind_w: i32,
     ind_a: u8,
+}
+
+/// Nearest-integer quantisation. `as i32` truncates toward zero, which puts
+/// the decision boundary exactly on the rest values.
+fn qi(v: f32) -> i32 {
+    if v >= 0.0 { (v + 0.5) as i32 } else { (v - 0.5) as i32 }
+}
+
+fn qu(v: f32) -> u8 {
+    (v + 0.5).clamp(0.0, 255.0) as u8
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Default)]
@@ -475,18 +492,21 @@ impl Dock {
 
     /// Everything `draw` will read, computed once and quantised.
     fn rebuild_visuals(&mut self, cursor: (f32, f32)) {
-        let panel_lift = ((1.0 - self.presence) * 40.0) as i32;
+        let panel_lift = qi((1.0 - self.presence) * 40.0);
         self.panel_vis = PanelVisual {
             y: self.panel.y0 + panel_lift,
             alpha: (self.presence * 255.0) as u8,
         };
 
         let baseline = self.baseline();
+        // The shadow floor and the pill ride with the panel while it enters.
+        let floor_y = self.floor_y() + panel_lift;
+        let ind_y = self.ind_y() + panel_lift;
         for i in 0..SLOTS {
             let home = self.home_cx(i);
             let s = &mut self.slots[i];
             let te = s.entrance.t();
-            let alpha = (easing::ease_out_quad(te) * 255.0) as u8;
+            let alpha = qu(easing::ease_out_quad(te) * 255.0);
             if alpha == 0 {
                 s.vis = SlotVisual::default();
                 continue;
@@ -514,32 +534,34 @@ impl Dock {
 
             s.vis = SlotVisual {
                 live: true,
-                x: (cx - size_x * 0.5) as i32,
-                y: (bottom - size_y) as i32,
-                w: size_x.max(1.0) as i32,
-                h: size_y.max(1.0) as i32,
+                x: qi(cx - size_x * 0.5),
+                y: qi(bottom - size_y),
+                w: qi(size_x).max(1),
+                h: qi(size_y).max(1),
                 alpha,
-                emblem: (s.emblem.current.clamp(0.0, 1.0) * 255.0) as u8,
-                shadow_rx: (size_x * 0.42 - lift * 0.50).max(4.0) as i32,
-                shadow_ry: (4.0 - lift * 0.15).max(1.5) as i32,
-                shadow_a: mul255((70.0 - lift * 2.2).max(12.0) as u8, alpha),
-                ring_a: (170.0 * env) as u8,
-                dim: (70.0 * env) as u8,
-                ind_x: (cx - ind_w * 0.5) as i32,
-                ind_w: ind_w as i32,
-                ind_a: if ind_w >= 1.0 { mul255(ind_a as u8, alpha) } else { 0 },
+                emblem: qu(s.emblem.current.clamp(0.0, 1.0) * 255.0),
+                floor_y,
+                shadow_rx: qi((size_x * 0.42 - lift * 0.50).max(4.0)),
+                shadow_ry: qi((4.0 - lift * 0.15).max(1.5)),
+                shadow_a: mul255(qu((70.0 - lift * 2.2).max(12.0)), alpha),
+                ring_a: qu(170.0 * env),
+                dim: qu(70.0 * env),
+                ind_y,
+                ind_x: qi(cx - ind_w * 0.5),
+                ind_w: qi(ind_w),
+                ind_a: if ind_w >= 0.5 { mul255(qu(ind_a), alpha) } else { 0 },
             };
         }
 
         let slot = (self.tip_slot as usize).min(SLOTS - 1);
-        let alpha = (self.tip_alpha.current.clamp(0.0, 1.0) * 255.0) as u8;
+        let alpha = qu(self.tip_alpha.current.clamp(0.0, 1.0) * 255.0);
         let mag = self.slots[slot].mag.current.clamp(0.0, 1.0);
         self.tip_vis = if alpha < 4 {
             TipVisual::default()
         } else {
             TipVisual {
-                cx: self.tip_x.current as i32,
-                y: self.panel.y0 - 44 - (12.0 * mag) as i32,
+                cx: qi(self.tip_x.current),
+                y: self.panel.y0 - 44 - qi(12.0 * mag),
                 w: text::measure(&font_data::FONT_UI, LABELS[slot]) + 30,
                 alpha,
                 slot: slot as u8,
@@ -564,11 +586,10 @@ impl Dock {
         let mut r = Rect::from_size(v.x, v.y, v.w, v.h).expand(6);
         if v.shadow_a > 0 {
             let cx = v.x + v.w / 2;
-            let floor = self.floor_y();
-            r = r.union(&Rect::new(cx - v.shadow_rx - 2, floor - v.shadow_ry - 2, cx + v.shadow_rx + 2, floor + v.shadow_ry + 2));
+            r = r.union(&Rect::new(cx - v.shadow_rx - 2, v.floor_y - v.shadow_ry - 2, cx + v.shadow_rx + 2, v.floor_y + v.shadow_ry + 2));
         }
         if v.ind_a > 0 {
-            r = r.union(&Rect::from_size(v.ind_x - 1, self.ind_y() - 1, v.ind_w + 2, IND_H + 2));
+            r = r.union(&Rect::from_size(v.ind_x - 1, v.ind_y - 1, v.ind_w + 2, IND_H + 2));
         }
         r
     }
@@ -632,8 +653,6 @@ impl Dock {
             shapes::glass_highlights(frame, dx, dy, PANEL_W, PANEL_H, PANEL_R, panel.alpha);
         }
 
-        let floor = self.floor_y();
-        let ind_y = self.ind_y();
         for (i, slot) in self.slots.iter().enumerate() {
             let v = slot.vis;
             if !v.live || !self.slot_bounds(&v).intersects(&clip) {
@@ -641,11 +660,11 @@ impl Dock {
             }
             let cx = v.x + v.w / 2;
             if v.shadow_a > 0 {
-                shapes::fill_ellipse(frame, cx, floor, v.shadow_rx, v.shadow_ry, Color::rgba(20, 50, 90, v.shadow_a));
+                shapes::fill_ellipse(frame, cx, v.floor_y, v.shadow_rx, v.shadow_ry, Color::rgba(20, 50, 90, v.shadow_a));
             }
             icons::draw_slot(frame, i, v.x, v.y, v.w, v.h, mul255(v.alpha, 255 - v.dim), v.emblem);
             if v.ind_a > 0 {
-                shapes::fill_rounded_rect(frame, v.ind_x, ind_y, v.ind_w, IND_H, 2, icons::PLATES[i].indicator.with_alpha(v.ind_a));
+                shapes::fill_rounded_rect(frame, v.ind_x, v.ind_y, v.ind_w, IND_H, 2, icons::PLATES[i].indicator.with_alpha(v.ind_a));
             }
             if v.ring_a > 0 {
                 let r = (v.w.min(v.h) * 31 + 50) / 100;

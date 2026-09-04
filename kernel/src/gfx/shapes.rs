@@ -459,9 +459,11 @@ pub fn stroke_rounded_rect<C: Canvas>(fb: &mut C, x: i32, y: i32, w: i32, h: i32
         if px < bx0 || py < by0 || px >= bx1 || py >= by1 {
             return;
         }
-        let cov_in = rounded_coverage_signed(px - x, py - y, w, h, r, 0);
-        let cov_out = rounded_coverage_signed(px - x, py - y, w, h, r, 1);
-        let edge = cov_out.saturating_sub(cov_in);
+        // The border is whatever the full shape covers that the shape shrunk
+        // by one pixel does not.
+        let full = rounded_coverage_signed(px - x, py - y, w, h, r, 0);
+        let inset = rounded_coverage_signed(px - x, py - y, w, h, r, 1);
+        let edge = full.saturating_sub(inset);
         if edge == 0 { return; }
         fb.blend_pixel(px as usize, py as usize, c.fade(edge));
     };
