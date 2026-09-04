@@ -1,6 +1,7 @@
 use crate::anim::{easing, Spring, Tween};
 use crate::apps::AppKind;
 use crate::display::Frame;
+use crate::dock::Dock;
 use crate::gfx::{font_data, shapes, Canvas, Color, Damage, Framebuffer, Rect};
 use crate::input::{Key, KeyBatch, Snapshot};
 use crate::widgets::{self, RollingClock};
@@ -15,26 +16,9 @@ enum ShellMode {
 
 const FLOOR_FROM_BOTTOM: f32 = 110.0;
 const MAX_RIPPLES: usize = 8;
-const DOCK_ICONS: usize = 6;
 /// Matches the reach of the shadow the shapes module draws.
 /// How far the lock screen's entrance lifts its contents.
 const LOCK_RISE: i32 = 26;
-const DOCK_APPS: [Option<AppKind>; DOCK_ICONS] = [
-    Some(AppKind::Ball),
-    Some(AppKind::Clock),
-    None,
-    None,
-    None,
-    None,
-];
-const DOCK_TINTS: [Color; DOCK_ICONS] = [
-    Color::LUMEN_ACCENT,
-    Color::LUMEN_GLOW,
-    Color::rgb(255, 150, 180),
-    Color::rgb(150, 230, 200),
-    Color::rgb(200, 180, 255),
-    Color::LUMEN_INK,
-];
 const RIPPLE_LIFETIME: f32 = 0.95;
 
 #[derive(Copy, Clone)]
@@ -66,6 +50,7 @@ pub struct Scene {
     date_buf: [u8; 48],
     date_len: usize,
     windows: WindowManager,
+    dock: Dock,
     damage: Damage,
     /// Where the cursor was drawn last, so a still cursor costs nothing.
     last_cursor: (i32, i32),
@@ -101,6 +86,7 @@ impl Scene {
             date_buf: [0; 48],
             date_len: 0,
             windows: WindowManager::new(w, h),
+            dock: Dock::new(width as i32, height as i32),
             damage: Damage::new(width as i32, height as i32),
             last_cursor: (mid_x as i32, mid_y as i32),
             date_dirty: true,
@@ -186,12 +172,6 @@ impl Scene {
         self.windows.open(AppKind::Clock, self.width * 0.63, self.height * 0.34, 0.44);
     }
 
-    fn dock_icon_rect(&self, i: usize) -> (i32, i32, i32, i32) {
-        let (dx, dy, dw, dh) = self.dock_rect();
-        let size = 52;
-        let gap = (dw - size * DOCK_ICONS as i32 - 24) / (DOCK_ICONS as i32 - 1).max(1);
-        (dx + 12 + i as i32 * (size + gap), dy + (dh - size) / 2, size, size)
-    }
 
     /// True when a point is on the shell's own chrome, which sits above every
     /// window and therefore swallows the press.
@@ -199,7 +179,8 @@ impl Scene {
         let inside = |(x, y, w, h): (i32, i32, i32, i32)| {
             px >= x as f32 && px < (x + w) as f32 && py >= y as f32 && py < (y + h) as f32
         };
-        inside(self.top_bar_rect()) || inside(self.dock_rect())
+        let d = self.dock.rect();
+        inside(self.top_bar_rect()) || inside((d.x0, d.y0, d.x1 - d.x0, d.y1 - d.y0))
     }
 
     /// Takes the keystrokes the shell claims for itself and hands back the
@@ -218,7 +199,7 @@ impl Scene {
                 Key::Tab => self.windows.cycle_focus(),
                 Key::Char(c) if ('1'..='6').contains(&c) => {
                     let slot = c as usize - '1' as usize;
-                    if let Some(kind) = DOCK_APPS[slot] {
+                    if let Some(kind) = Dock::app_in_slot(slot) {
                         self.windows
                             .open(kind, self.width * 0.32, self.height * 0.3, 0.0);
                     }
@@ -229,16 +210,6 @@ impl Scene {
         rest
     }
 
-    fn dock_hit(&self, px: f32, py: f32) -> Option<AppKind> {
-        for i in 0..DOCK_ICONS {
-            let (x, y, w, h) = self.dock_icon_rect(i);
-            // Generous vertical slack: the icons are small targets.
-            if px >= x as f32 && px < (x + w) as f32 && py >= (y - 6) as f32 && py < (y + h + 10) as f32 {
-                return DOCK_APPS[i];
-            }
-        }
-        None
-    }
 
     pub fn update(&mut self, dt: f32, input: &Snapshot) {
         self.clock_phase += dt;
@@ -270,7 +241,7 @@ impl Scene {
             }
             let mut taken = false;
             if click && self.mode == ShellMode::Desktop {
-                if let Some(kind) = self.dock_hit(cursor.0, cursor.1) {
+                if let Some(kind) = self.dock.slot_at(cursor.0, cursor.1).and_then(Dock::app_in_slot) {
                     self.windows.open(kind, self.width * 0.32, self.height * 0.3, 0.0);
                     taken = true;
                 } else if self.chrome_hit(cursor.0, cursor.1) {
@@ -399,13 +370,6 @@ impl Scene {
         ((w - bar_w) / 2, 18, bar_w, bar_h)
     }
 
-    fn dock_rect(&self) -> (i32, i32, i32, i32) {
-        let w = self.width as i32;
-        let h = self.height as i32;
-        let dock_w = (self.width * 0.42) as i32;
-        let dock_h = 84;
-        ((w - dock_w) / 2, h - dock_h - 22, dock_w, dock_h)
-    }
 
     /// How far the shell chrome has arrived: 0 while locked, 1 on the desktop.
     fn chrome_t(&self) -> f32 {
@@ -435,36 +399,7 @@ impl Scene {
             shapes::glass_highlights(frame, bx, by - bar_lift, bw, bh, 22, alpha(255));
         }
 
-        let (dx, dy, dw, dh) = self.dock_rect();
-        let dock_lift = ((1.0 - t) * 40.0) as i32;
-        if !Rect::from_size(dx, dy + dock_lift, dw, dh)
-            .union(&shapes::shadow_bounds(dx, dy + dock_lift, dw, dh))
-            .intersects(&clip)
-        {
-            return;
-        }
-        shapes::drop_shadow(frame, dx, dy + dock_lift, dw, dh, 26);
-        frame.glass_fill(dx, dy + dock_lift, dw, dh, 26, Color::LUMEN_CARD.with_alpha(130), alpha(255));
-        shapes::glass_highlights(frame, dx, dy + dock_lift, dw, dh, 26, alpha(255));
-
-        let icon_size = 52;
-        let icon_gap = (dw - icon_size * DOCK_ICONS as i32 - 24) / (DOCK_ICONS as i32 - 1).max(1);
-        let icon_y = dy + dock_lift + (dh - icon_size) / 2;
-        for (i, tint) in DOCK_TINTS.iter().enumerate() {
-            // Each icon lands a beat after the one before it.
-            let start = 0.20 + i as f32 * 0.07;
-            let local = ((t - start) / 0.45).clamp(0.0, 1.0);
-            if local <= 0.0 {
-                continue;
-            }
-            let pop = easing::ease_out_back(local);
-            let size = (icon_size as f32 * (0.55 + 0.45 * pop)) as i32;
-            let ix = dx + 12 + i as i32 * (icon_size + icon_gap) + (icon_size - size) / 2;
-            let iy = icon_y + (icon_size - size) / 2;
-            let a = (local * 255.0) as u8;
-            shapes::fill_rounded_rect(frame, ix, iy, size, size, size * 27 / 100, tint.with_alpha(a));
-            shapes::fill_rect(frame, ix + 8, icon_y + icon_size + 4, size - 16, 2, Color::WHITE.with_alpha(a / 2));
-        }
+        self.dock.draw(frame, t);
     }
 
     fn draw_top_clock<C: Canvas>(&self, fb: &mut C) {
