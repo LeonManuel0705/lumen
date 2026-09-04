@@ -48,6 +48,11 @@ latency all become kernel concerns.
   carried through the drawing primitives so they narrow their loops to it instead of
   drawing pixels that will be thrown away, and a self-test that catches a region somebody
   forgot to claim
+* A dock with six icons drawn from the same primitives, each authored in a fixed design
+  cell so a tile can be 52 or 80 pixels without redrawing the artwork. The row swells
+  under the cursor, a launch throws the icon into a ballistic bounce whose landing drives
+  the squash, a pill under an icon exists only while its window does, and the slots whose
+  apps are not built yet say so before the click and shake their head after it
 
 **Animation**
 
@@ -78,10 +83,11 @@ cargo run
 That builds the kernel for `x86_64-unknown-none`, assembles a bootable BIOS disk image,
 and launches QEMU at 1280x720 with the host clock passed through.
 
-The current build boots into a lock screen. Space or a click unlocks it, and the desktop
+The current build boots into a lock screen. Any key or a click unlocks it, and the desktop
 arrives with two windows. Drag them by the title bar, click one to bring it to the front,
-click the red dot to close it, and click the first two dock icons to open them again.
-Inside the ball window, click the ball to throw it, space to make it jump, R to reset it.
+close one with the red dot, Escape or Ctrl-W, walk the stack with Tab, and launch apps
+from the dock by clicking or with the number keys 1 to 6. Inside the ball window, click
+the ball to throw it, space to make it jump, R to reset it.
 
 | Variable | Effect |
 |:---|:---|
@@ -134,8 +140,9 @@ the right moment, so the kernel checks its own work: every two seconds it redraw
 whole scene into scratch space and compares, and reports the first disagreeing pixel over
 the serial port. Set `VERIFY_EVERY` to 0 in `main.rs` to turn it off.
 
-There is still no window resizing, no minimise, and no keyboard event queue: keys are
-decoded as a handful of booleans rather than events, which is the next thing in the way.
+There is still no window resizing and no minimise, and window glass reads its frosted
+backdrop from the wallpaper rather than from whatever is actually behind the window,
+which is invisible until windows overlap and is the next thing in the way.
 
 ## License
 
