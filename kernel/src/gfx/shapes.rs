@@ -14,6 +14,43 @@ pub fn fill_rect<C: Canvas>(fb: &mut C, x: i32, y: i32, w: i32, h: i32, c: Color
     }
 }
 
+/// A rounded rect shaded from `top` to `bottom`, one colour per row. The plain
+/// `vertical_gradient` cannot do this: it ramps over the whole canvas height
+/// and fills the whole clip.
+pub fn fill_rounded_rect_vgrad<C: Canvas>(fb: &mut C, x: i32, y: i32, w: i32, h: i32, r: i32, top: Color, bottom: Color) {
+    if w <= 0 || h <= 0 { return; }
+    let r = r.max(0).min(w / 2).min(h / 2);
+    let (cx0, cy0, cx1, cy1) = fb.bounds();
+    let x0 = x.max(cx0);
+    let y0 = y.max(cy0);
+    let x1 = (x + w).min(cx1);
+    let y1 = (y + h).min(cy1);
+
+    for py in y0..y1 {
+        let ly = py - y;
+        let c = Color::lerp(top, bottom, ((ly * 255) / (h - 1).max(1)) as u8);
+        let (run_start, run_end) = if ly >= r && ly < h - r {
+            (x0, x1)
+        } else {
+            let inset = corner_inset(ly, h, r);
+            ((x + inset).max(x0), (x + w - inset).min(x1))
+        };
+        for px in x0..run_start {
+            let cov = rounded_coverage(px - x, ly, w, h, r);
+            if cov == 0 { continue; }
+            fb.blend_pixel(px as usize, py as usize, c.fade(cov));
+        }
+        if run_end > run_start {
+            fb.fill_row(run_start as usize, py as usize, (run_end - run_start) as usize, c);
+        }
+        for px in run_end.max(run_start)..x1 {
+            let cov = rounded_coverage(px - x, ly, w, h, r);
+            if cov == 0 { continue; }
+            fb.blend_pixel(px as usize, py as usize, c.fade(cov));
+        }
+    }
+}
+
 /// How far in from the edge a row of a rounded rect is fully inside the shape.
 /// Rows between the arcs are straight and can be filled in one run.
 ///

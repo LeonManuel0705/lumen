@@ -1,7 +1,7 @@
 use crate::anim::{easing, Spring, Tween};
 use crate::apps::AppKind;
 use crate::display::Frame;
-use crate::dock::Dock;
+use crate::dock::{Dock, DockAction, SLOTS as DOCK_SLOTS};
 use crate::gfx::{font_data, shapes, Canvas, Color, Damage, Framebuffer, Rect};
 use crate::input::{Key, KeyBatch, Snapshot};
 use crate::widgets::{self, RollingClock};
@@ -27,6 +27,13 @@ struct Ripple {
     y: f32,
     age: f32,
     alive: bool,
+    start_r: f32,
+    grow: f32,
+    life: f32,
+}
+
+impl Ripple {
+    const NONE: Ripple = Ripple { x: 0.0, y: 0.0, age: 0.0, alive: false, start_r: 0.0, grow: 0.0, life: 1.0 };
 }
 
 pub struct Scene {
@@ -75,7 +82,7 @@ impl Scene {
             cursor_target_y: mid_y,
             cursor_x: Spring::new(mid_x, 8000.0, 200.0),
             cursor_y: Spring::new(mid_y, 8000.0, 200.0),
-            ripples: [Ripple { x: 0.0, y: 0.0, age: 0.0, alive: false }; MAX_RIPPLES],
+            ripples: [Ripple::NONE; MAX_RIPPLES],
             next_ripple: 0,
             mode: ShellMode::Locked,
             top_clock: RollingClock::new(&font_data::FONT_CLOCK, true),
@@ -167,6 +174,7 @@ impl Scene {
         self.mode = ShellMode::Unlocking;
         self.unlock.restart();
         self.clock_entrance.restart();
+        self.dock.begin_entrance();
         // The desktop arrives with something on it, one window after the other.
         self.windows.open(AppKind::Ball, self.width * 0.19, self.height * 0.28, 0.24);
         self.windows.open(AppKind::Clock, self.width * 0.63, self.height * 0.34, 0.44);
@@ -179,8 +187,39 @@ impl Scene {
         let inside = |(x, y, w, h): (i32, i32, i32, i32)| {
             px >= x as f32 && px < (x + w) as f32 && py >= y as f32 && py < (y + h) as f32
         };
-        let d = self.dock.rect();
-        inside(self.top_bar_rect()) || inside((d.x0, d.y0, d.x1 - d.x0, d.y1 - d.y0))
+        inside(self.top_bar_rect())
+    }
+
+    /// What the window manager says about each slot's app: closed, open, or
+    /// focused. Derived every frame and never remembered, so a window closed
+    /// by any route retracts its pill on the same frame.
+    fn dock_state(&self) -> [u8; DOCK_SLOTS] {
+        let focused = self.windows.focused_kind();
+        let mut state = [0u8; DOCK_SLOTS];
+        for (slot, entry) in state.iter_mut().enumerate() {
+            if let Some(kind) = Dock::app_in_slot(slot) {
+                *entry = if Some(kind) == focused {
+                    2
+                } else if self.windows.is_open(kind) {
+                    1
+                } else {
+                    0
+                };
+            }
+        }
+        state
+    }
+
+    /// Carries out what the dock decided. True when the press belonged to it.
+    fn apply_dock(&mut self, action: DockAction) -> bool {
+        match action {
+            DockAction::None => false,
+            DockAction::Consumed | DockAction::Denied => true,
+            DockAction::Launch(kind) => {
+                self.windows.open(kind, self.width * 0.32, self.height * 0.3, 0.0);
+                true
+            }
+        }
     }
 
     /// Takes the keystrokes the shell claims for itself and hands back the
@@ -199,10 +238,8 @@ impl Scene {
                 Key::Tab => self.windows.cycle_focus(),
                 Key::Char(c) if ('1'..='6').contains(&c) => {
                     let slot = c as usize - '1' as usize;
-                    if let Some(kind) = Dock::app_in_slot(slot) {
-                        self.windows
-                            .open(kind, self.width * 0.32, self.height * 0.3, 0.0);
-                    }
+                    let action = self.dock.activate_from_keyboard(slot);
+                    self.apply_dock(action);
                 }
                 _ => rest.push(*event),
             }
@@ -239,19 +276,23 @@ impl Scene {
             if click {
                 self.spawn_ripple(cursor.0, cursor.1);
             }
-            let mut taken = false;
-            if click && self.mode == ShellMode::Desktop {
-                if let Some(kind) = self.dock.slot_at(cursor.0, cursor.1).and_then(Dock::app_in_slot) {
-                    self.windows.open(kind, self.width * 0.32, self.height * 0.3, 0.0);
-                    taken = true;
-                } else if self.chrome_hit(cursor.0, cursor.1) {
-                    // The glass is a surface, not a hole: a press that lands on
-                    // the dock or the top bar stops there.
-                    taken = true;
-                }
+            // The dock sees the press first so its depress shows on the same
+            // frame; what it decides is carried out here.
+            let interactive = self.mode == ShellMode::Desktop && !self.windows.is_dragging();
+            let state = self.dock_state();
+            self.dock.set_presence(self.chrome_t());
+            let action = self.dock.update(dt, cursor, click, held, &state, interactive);
+            let mut taken = self.apply_dock(action);
+            if click && !taken && self.chrome_hit(cursor.0, cursor.1) {
+                // The glass is a surface, not a hole: a press that lands on
+                // the top bar stops there.
+                taken = true;
             }
             let for_apps = self.handle_shortcuts(&input.keys);
             self.windows.update(dt, cursor, click && !taken, held, &for_apps);
+            if let Some((x, y)) = self.dock.take_landing() {
+                self.spawn_ripple_sized(x, y, 10.0, 30.0, 0.42);
+            }
         }
 
         self.clock_entrance.step(dt);
@@ -270,7 +311,7 @@ impl Scene {
         for r in self.ripples.iter_mut() {
             if !r.alive { continue; }
             r.age += dt;
-            if r.age > RIPPLE_LIFETIME { r.alive = false; }
+            if r.age > r.life { r.alive = false; }
         }
     }
 
@@ -290,7 +331,7 @@ impl Scene {
             if !r.alive {
                 continue;
             }
-            let radius = (16.0 + (r.age / RIPPLE_LIFETIME) * 180.0) as i32 + 6;
+            let radius = (r.start_r + (r.age / r.life) * r.grow) as i32 + 6;
             self.damage.add(Rect::from_size(
                 r.x as i32 - radius,
                 r.y as i32 - radius,
@@ -325,17 +366,23 @@ impl Scene {
                     self.damage.add(self.top_clock_rect());
                 }
                 self.windows.damage_into(&mut self.damage);
+                self.dock.damage(&mut self.damage);
             }
         }
         // Windows keep animating behind the lock screen and while it lifts, so
         // their damage is collected in every mode, not only on the desktop.
         if self.mode != ShellMode::Desktop {
             self.windows.forget_damage();
+            self.dock.forget();
         }
     }
 
     fn spawn_ripple(&mut self, x: f32, y: f32) {
-        self.ripples[self.next_ripple] = Ripple { x, y, age: 0.0, alive: true };
+        self.spawn_ripple_sized(x, y, 16.0, 180.0, RIPPLE_LIFETIME);
+    }
+
+    fn spawn_ripple_sized(&mut self, x: f32, y: f32, start_r: f32, grow: f32, life: f32) {
+        self.ripples[self.next_ripple] = Ripple { x, y, age: 0.0, alive: true, start_r, grow, life };
         self.next_ripple = (self.next_ripple + 1) % MAX_RIPPLES;
     }
 
@@ -398,8 +445,6 @@ impl Scene {
             frame.glass_fill(bx, by - bar_lift, bw, bh, 22, Color::LUMEN_CARD.with_alpha(130), alpha(255));
             shapes::glass_highlights(frame, bx, by - bar_lift, bw, bh, 22, alpha(255));
         }
-
-        self.dock.draw(frame, t);
     }
 
     fn draw_top_clock<C: Canvas>(&self, fb: &mut C) {
@@ -446,6 +491,7 @@ impl Scene {
             self.windows.draw(fb);
         }
         self.draw_chrome(fb);
+        self.dock.draw(fb);
         if self.mode != ShellMode::Locked {
             self.draw_top_clock(fb);
         }
@@ -453,8 +499,8 @@ impl Scene {
         let clip = fb.clip();
         for r in &self.ripples {
             if !r.alive { continue; }
-            let t = r.age / RIPPLE_LIFETIME;
-            let radius = (16.0 + t * 180.0) as i32;
+            let t = r.age / r.life;
+            let radius = (r.start_r + t * r.grow) as i32;
             let alpha = ((1.0 - t) * (1.0 - t) * 200.0) as u8;
             if alpha < 6 { continue; }
             // A ripple 400 px across still costs thousands of coverage tests
@@ -474,8 +520,10 @@ impl Scene {
 
         let cx = self.cursor_x.current as i32;
         let cy = self.cursor_y.current as i32;
-        shapes::fill_circle(fb, cx, cy, 22, Color::LUMEN_ACCENT.with_alpha(35));
-        shapes::fill_circle(fb, cx, cy, 14, Color::LUMEN_ACCENT.with_alpha(110));
+        // Over the dock the cursor picks up the colour of the icon under it.
+        let tint = self.dock.hover_tint().unwrap_or(Color::LUMEN_ACCENT);
+        shapes::fill_circle(fb, cx, cy, 22, tint.with_alpha(35));
+        shapes::fill_circle(fb, cx, cy, 14, tint.with_alpha(110));
         shapes::fill_circle(fb, cx, cy, 7,  Color::WHITE.with_alpha(220));
         shapes::fill_circle(fb, cx, cy, 3,  Color::WHITE);
     }

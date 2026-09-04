@@ -4,6 +4,7 @@ pub mod color;
 pub mod damage;
 pub mod font_data;
 pub mod framebuffer;
+pub mod icons;
 pub mod rect;
 pub mod shapes;
 pub mod surface;

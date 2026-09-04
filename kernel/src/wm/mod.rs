@@ -146,6 +146,20 @@ impl WindowManager {
             .position(|w| w.kind == kind && w.closing.is_none())
     }
 
+    /// Whether a window of this app is on screen and not on its way out.
+    pub fn is_open(&self, kind: AppKind) -> bool {
+        self.index_of_kind(kind).is_some()
+    }
+
+    /// The app whose window has focus, if any.
+    pub fn focused_kind(&self) -> Option<AppKind> {
+        self.windows.iter().rev().find(|w| w.closing.is_none()).map(|w| w.kind)
+    }
+
+    pub fn is_dragging(&self) -> bool {
+        self.dragging.is_some()
+    }
+
     /// Opens an app, or raises it if a window of that app is already up. The
     /// delay lets a boot sequence stagger its windows.
     pub fn open(&mut self, kind: AppKind, x: f32, y: f32, delay: f32) {
