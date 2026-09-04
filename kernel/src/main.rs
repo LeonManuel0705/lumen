@@ -9,6 +9,7 @@ mod apps;
 mod arch;
 mod datefmt;
 mod display;
+mod dock;
 mod gfx;
 mod input;
 mod mem;
