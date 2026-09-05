@@ -1,4 +1,4 @@
-use crate::gfx::{font_data, shapes, Canvas, Color, Rect, Surface};
+use crate::gfx::{font_data, Canvas, Rect, Surface};
 use crate::widgets::{self, RollingClock};
 
 use super::{App, AppInput};
@@ -54,12 +54,6 @@ impl App for ClockApp {
     }
 
     fn draw(&self, surface: &mut Surface) {
-        shapes::vertical_gradient(
-            surface,
-            Color::rgba(255, 255, 255, 16),
-            Color::rgba(255, 255, 255, 34),
-            Color::rgba(255, 255, 255, 54),
-        );
         let cx = surface.width() as i32 / 2;
         let baseline = surface.height() as i32 / 2 + self.clock.digit_height() / 2 - 8;
         let pulse = 4.0 * self.phase * (1.0 - self.phase);

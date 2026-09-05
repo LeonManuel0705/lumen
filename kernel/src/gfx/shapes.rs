@@ -360,11 +360,16 @@ pub fn drop_shadow<C: Canvas>(fb: &mut C, x: i32, y: i32, w: i32, h: i32, r: i32
         let mid_start = span_start.max(x0);
         let mid_end = (span_start + span_len).min(x1);
 
-        for px in x0..mid_start {
-            let c = shade(falloff(px, span_start, span_len, SPREAD), fy);
-            if c.a > 0 {
-                fb.blend_pixel(px as usize, py as usize, c);
+        // The side segments have a different alpha per column, but they are
+        // short, so a strip of colours through the row blender beats a
+        // decode and encode per pixel.
+        let mut strip = [Color::TRANSPARENT; SPREAD as usize * 2 + 2];
+        if mid_start > x0 {
+            let n = ((mid_start - x0) as usize).min(strip.len());
+            for k in 0..n {
+                strip[k] = shade(falloff(x0 + k as i32, span_start, span_len, SPREAD), fy);
             }
+            fb.blend_row(x0 as usize, py as usize, &strip[..n], 255);
         }
 
         // Whatever the panel itself covers is not worth shading.
@@ -375,11 +380,13 @@ pub fn drop_shadow<C: Canvas>(fb: &mut C, x: i32, y: i32, w: i32, h: i32, r: i32
             }
         }
 
-        for px in mid_end.max(mid_start)..x1 {
-            let c = shade(falloff(px, span_start, span_len, SPREAD), fy);
-            if c.a > 0 {
-                fb.blend_pixel(px as usize, py as usize, c);
+        let right = mid_end.max(mid_start);
+        if x1 > right {
+            let n = ((x1 - right) as usize).min(strip.len());
+            for k in 0..n {
+                strip[k] = shade(falloff(right + k as i32, span_start, span_len, SPREAD), fy);
             }
+            fb.blend_row(right as usize, py as usize, &strip[..n], 255);
         }
     }
 }

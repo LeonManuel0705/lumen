@@ -9,6 +9,10 @@ pub const MAX_REGIONS: usize = 8;
 /// the frame is repainted whole.
 const FULL_SCREEN_FRACTION: i64 = 70;
 
+/// Two overlapping regions are merged only if their union is at most this
+/// much larger than the two together.
+const MERGE_SLACK_PERCENT: i64 = 130;
+
 /// The regions of the screen that changed this frame.
 ///
 /// The invariant the whole scheme rests on: the back buffer always holds the
@@ -56,12 +60,17 @@ impl Damage {
             return;
         }
 
-        // Fold into an overlapping region if there is one. Merging can make the
-        // merged region overlap a third, so keep folding until it settles.
+        // Fold into an overlapping region when the union wastes little: a
+        // window's rectangle from one frame to the next, say. Two far-apart
+        // regions bridged by a small one must stay apart, or the box around
+        // them drags everything in between into the repaint. Regions may
+        // overlap as a result; overlap costs double work, never a wrong
+        // pixel. Merging can make the merged region overlap a third, so keep
+        // folding until it settles.
         let mut candidate = rect;
         let mut i = 0;
         while i < self.len {
-            if self.regions[i].intersects(&candidate) {
+            if Self::should_merge(&self.regions[i], &candidate) {
                 candidate = self.regions[i].union(&candidate);
                 self.len -= 1;
                 self.regions[i] = self.regions[self.len];
@@ -97,6 +106,14 @@ impl Damage {
         if self.total_area() * 100 > self.screen.area() * FULL_SCREEN_FRACTION {
             self.mark_all();
         }
+    }
+
+    fn should_merge(a: &Rect, b: &Rect) -> bool {
+        if !a.intersects(b) {
+            return false;
+        }
+        let union = a.union(b).area();
+        union <= (a.area() + b.area()) * MERGE_SLACK_PERCENT / 100
     }
 
     pub fn add_all(&mut self, other: &Damage) {

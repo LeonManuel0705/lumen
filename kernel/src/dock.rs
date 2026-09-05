@@ -1,6 +1,7 @@
 use crate::anim::{easing, Spring, Tween};
 use crate::apps::AppKind;
-use crate::display::Frame;
+use crate::display::{Frame, GlassCache};
+use core::cell::RefCell;
 use crate::gfx::color::mul255;
 use crate::gfx::{font_data, icons, shapes, text, Canvas, Color, Damage, Rect};
 use crate::widgets;
@@ -206,6 +207,7 @@ pub struct Dock {
     tip_vis: TipVisual,
     tip_drawn: TipVisual,
     landing: Option<(f32, f32)>,
+    panel_glass: RefCell<GlassCache>,
 }
 
 impl Dock {
@@ -231,6 +233,7 @@ impl Dock {
             tip_vis: TipVisual::default(),
             tip_drawn: TipVisual::default(),
             landing: None,
+            panel_glass: RefCell::new(GlassCache::new()),
         }
     }
 
@@ -649,7 +652,7 @@ impl Dock {
         if self.panel_bounds(&panel).intersects(&clip) {
             let (dx, dy) = (self.panel.x0, panel.y);
             shapes::drop_shadow(frame, dx, dy, PANEL_W, PANEL_H, PANEL_R);
-            frame.glass_fill(dx, dy, PANEL_W, PANEL_H, PANEL_R, Color::LUMEN_CARD.with_alpha(130), panel.alpha);
+            frame.glass_fill_cached(&mut self.panel_glass.borrow_mut(), dx, dy, PANEL_W, PANEL_H, PANEL_R, Color::LUMEN_CARD.with_alpha(130), panel.alpha);
             shapes::glass_highlights(frame, dx, dy, PANEL_W, PANEL_H, PANEL_R, panel.alpha);
         }
 

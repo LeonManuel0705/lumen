@@ -3,6 +3,10 @@ use alloc::vec::Vec;
 
 use super::{Canvas, Color, Rect};
 
+/// Widest row the scaled blit samples on the stack; wider rows fall back to
+/// the per-pixel path.
+const SCRATCH_ROW: usize = 2048;
+
 /// An off-screen RGBA buffer on the heap. Unlike the screen it keeps alpha, so
 /// a window can be drawn once and composited translucent, faded, or scaled.
 pub struct Surface {
@@ -150,22 +154,42 @@ impl Surface {
             return;
         }
 
+        // Sample each output row into a scratch row and hand it to the row
+        // blender, which knows the pixel format once instead of per pixel.
+        // The column each output pixel samples is the same on every row, so
+        // that map is built once per blit rather than once per pixel.
+        let n = (x1 - x0) as usize;
+        if n > SCRATCH_ROW {
+            for py in y0..y1 {
+                let sy = (((py - origin_y) as i64 * step) >> 16) as usize;
+                if sy >= self.height {
+                    continue;
+                }
+                for px in x0..x1 {
+                    let sx = (((px - origin_x) as i64 * step) >> 16) as usize;
+                    if sx < self.width {
+                        dst.paint(px as usize, py as usize, self.at(sx, sy).fade(opacity));
+                    }
+                }
+            }
+            return;
+        }
+        let mut columns = [0u16; SCRATCH_ROW];
+        for (k, px) in (x0..x1).enumerate() {
+            let sx = (((px - origin_x) as i64 * step) >> 16) as usize;
+            columns[k] = sx.min(self.width - 1) as u16;
+        }
+        let mut row = [Color::TRANSPARENT; SCRATCH_ROW];
         for py in y0..y1 {
             let sy = (((py - origin_y) as i64 * step) >> 16) as usize;
             if sy >= self.height {
                 continue;
             }
-            for px in x0..x1 {
-                let sx = (((px - origin_x) as i64 * step) >> 16) as usize;
-                if sx >= self.width {
-                    continue;
-                }
-                let src = self.at(sx, sy);
-                if src.a == 0 {
-                    continue;
-                }
-                dst.paint(px as usize, py as usize, src.fade(opacity));
+            let source = &self.pixels[sy * self.width..(sy + 1) * self.width];
+            for k in 0..n {
+                row[k] = source[columns[k] as usize];
             }
+            dst.blend_row(x0 as usize, py as usize, &row[..n], opacity);
         }
     }
 }

@@ -3,7 +3,8 @@ use alloc::vec::Vec;
 
 use crate::anim::{easing, Spring, Tween};
 use crate::apps::{App, AppInput, AppKind};
-use crate::display::Frame;
+use crate::display::{Frame, GlassCache};
+use core::cell::RefCell;
 use crate::input::KeyBatch;
 use crate::gfx::{font_data, shapes, text, Canvas, Color, Damage, Rect, Surface};
 
@@ -43,6 +44,10 @@ pub struct Window {
     last_ink: Rect,
     was_focused: bool,
     first_frame: bool,
+    /// The frame's glass at rest, so a window that is not moving costs a row
+    /// copy rather than a table pass. Interior mutability because drawing is
+    /// a read of the window's state that happens to refresh a cache.
+    glass: RefCell<GlassCache>,
 }
 
 impl Window {
@@ -208,6 +213,7 @@ impl WindowManager {
             last_ink: Rect::EMPTY,
             was_focused: false,
             first_frame: true,
+            glass: RefCell::new(GlassCache::new()),
         });
         crate::serial_println!("[wm] window {} opened ({}x{})", id, width, height);
     }
@@ -438,10 +444,14 @@ impl WindowManager {
         let radius = (CORNER as f32 * scale) as i32;
         let fade = |a: u32| ((a * opacity as u32) / 255) as u8;
 
-        shapes::drop_shadow(frame, x, y, w, h, radius);
+        // A window that is mostly faded out casts no visible shadow, and the
+        // shadow is a real slice of the frame budget while it is animating.
+        if opacity >= 150 {
+            shapes::drop_shadow(frame, x, y, w, h, radius);
+        }
 
         let tint = if focused { 112 } else { 92 };
-        frame.glass_fill(x, y, w, h, radius, Color::LUMEN_CARD.with_alpha(tint), opacity);
+        frame.glass_fill_cached(&mut win.glass.borrow_mut(), x, y, w, h, radius, Color::LUMEN_CARD.with_alpha(tint), opacity);
         shapes::glass_highlights(frame, x, y, w, h, radius, fade(255));
 
         // Title bar: a hairline under it, the close dot, and the app's name.

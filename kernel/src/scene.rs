@@ -1,6 +1,7 @@
 use crate::anim::{easing, Spring, Tween};
 use crate::apps::AppKind;
-use crate::display::Frame;
+use crate::display::{Frame, GlassCache};
+use core::cell::RefCell;
 use crate::dock::{Dock, DockAction, SLOTS as DOCK_SLOTS};
 use crate::gfx::{font_data, shapes, Canvas, Color, Damage, Framebuffer, Rect};
 use crate::input::{Key, KeyBatch, Snapshot};
@@ -67,6 +68,7 @@ pub struct Scene {
     /// Set when the date string changes, which is otherwise pixel-identical
     /// from one frame to the next.
     date_dirty: bool,
+    bar_glass: RefCell<GlassCache>,
 }
 
 impl Scene {
@@ -101,6 +103,7 @@ impl Scene {
             last_cursor: (mid_x as i32, mid_y as i32),
             last_tint: Color::LUMEN_ACCENT,
             date_dirty: true,
+            bar_glass: RefCell::new(GlassCache::new()),
         }
     }
 
@@ -453,7 +456,7 @@ impl Scene {
             .intersects(&clip)
         {
             shapes::drop_shadow(frame, bx, by - bar_lift, bw, bh, 22);
-            frame.glass_fill(bx, by - bar_lift, bw, bh, 22, Color::LUMEN_CARD.with_alpha(130), alpha(255));
+            frame.glass_fill_cached(&mut self.bar_glass.borrow_mut(), bx, by - bar_lift, bw, bh, 22, Color::LUMEN_CARD.with_alpha(130), alpha(255));
             shapes::glass_highlights(frame, bx, by - bar_lift, bw, bh, 22, alpha(255));
         }
     }

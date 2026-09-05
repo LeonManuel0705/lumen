@@ -160,13 +160,9 @@ impl App for BallApp {
     }
 
     fn draw(&self, surface: &mut Surface) {
-        // A hint of a room: brighter at the floor, with a line to bounce on.
-        shapes::vertical_gradient(
-            surface,
-            Color::rgba(255, 255, 255, 16),
-            Color::rgba(255, 255, 255, 34),
-            Color::rgba(255, 255, 255, 62),
-        );
+        // The surface stays transparent except for what actually moves: the
+        // compositor skips transparent pixels outright, and a translucent
+        // wash over the whole window was most of a full frame's cost.
         let floor_y = self.height as i32;
         shapes::fill_rect(surface, 0, floor_y - 2, self.width as i32, 2, Color::rgba(255, 255, 255, 150));
 

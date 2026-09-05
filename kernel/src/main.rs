@@ -99,15 +99,18 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     serial_println!("[lumen] entering main loop");
 
-    // How often the compositor checks its own work. A missed damage region is
-    // silent by nature, so it is worth a full redraw every couple of seconds to
-    // find out. Set to 0 to turn the check off.
-    const VERIFY_EVERY: u32 = 120;
+    // How often the compositor checks its own work, in frames. A missed damage
+    // region is silent by nature, so the check is worth having, but each run
+    // is a full extra redraw and therefore a dropped frame. Off by default;
+    // set to 60 or 120 while working on anything that reports damage.
+    const VERIFY_EVERY: u32 = 0;
 
     let dt = 1.0 / arch::TICK_HZ as f32;
     let mut last_seen: u64 = 0;
     let mut last_shown = day_base;
     let mut frames: u32 = 0;
+    let mut late_frames: u32 = 0;
+    let mut peak_cycles: u64 = 0;
     let mut fps_window = TICKS.load(Ordering::Relaxed);
     let mut busy_cycles: u64 = 0;
     let mut verify_cycles: u64 = 0;
@@ -119,6 +122,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         if steps == 0 {
             x86_64::instructions::interrupts::enable_and_hlt();
             continue;
+        }
+        // More than one tick since the last frame means that frame overran
+        // its budget: a hitch the eye notices long before the average does.
+        if steps > 1 && last_seen != 0 {
+            late_frames += 1;
         }
 
         // VM pauses and host sleep silently stop the PIT while the RTC keeps
@@ -172,7 +180,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         if !repaint.is_empty() {
             display::render(&repaint, |fb| scene.draw(fb));
         }
-        busy_cycles += arch::cycles() - frame_start;
+        let frame_cycles = arch::cycles() - frame_start;
+        busy_cycles += frame_cycles;
+        peak_cycles = peak_cycles.max(frame_cycles);
 
         if VERIFY_EVERY > 0 && frames % VERIFY_EVERY == VERIFY_EVERY - 1 {
             let started = arch::cycles();
@@ -191,12 +201,19 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         if now - fps_window >= 10 * arch::TICK_HZ as u64 {
             let secs = ticks_to_secs_f32(now - fps_window);
             let elapsed = (arch::cycles() - window_start).saturating_sub(verify_cycles);
+            // The peak is the number that explains hitches: an average well
+            // inside the budget says nothing about the one frame that was not.
+            let per_tick = elapsed.max(1) / (now - fps_window).max(1);
             serial_println!(
-                "[lumen] {} fps, {}% busy",
+                "[lumen] {} fps, {}% busy, {} late, peak {}% of a tick",
                 (frames as f32 / secs) as u32,
-                busy_cycles * 100 / elapsed.max(1)
+                busy_cycles * 100 / elapsed.max(1),
+                late_frames,
+                peak_cycles * 100 / per_tick.max(1)
             );
             frames = 0;
+            late_frames = 0;
+            peak_cycles = 0;
             busy_cycles = 0;
             verify_cycles = 0;
             fps_window = now;

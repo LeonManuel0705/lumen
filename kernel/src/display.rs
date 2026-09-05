@@ -3,6 +3,7 @@ use alloc::vec::Vec;
 use bootloader_api::info::{FrameBuffer as BootFb, FrameBufferInfo, PixelFormat as FbFormat};
 use spin::Mutex;
 
+use crate::gfx::color::mul255;
 use crate::gfx::{shapes, Canvas, Color, Damage, Framebuffer, Rect};
 
 /// How far the wallpaper is smeared for the frosted-glass cache. Two passes of
@@ -27,6 +28,30 @@ struct Display {
 unsafe impl Send for Display {}
 
 static DISPLAY: Mutex<Option<Display>> = Mutex::new(None);
+
+/// The tinted, blurred wallpaper under one panel, kept between frames.
+///
+/// Glass at rest never changes: it is a function of the wallpaper, which is
+/// baked once, and of the panel's rectangle and tint. Recomputing it through
+/// the tint table every frame was the single largest cost of a full repaint,
+/// so a panel keeps its last result and copies rows out of it until it moves
+/// or changes colour. Anything that re-bakes the wallpaper must drop every
+/// one of these.
+pub struct GlassCache {
+    rect: Rect,
+    tint: Color,
+    pixels: Vec<u8>,
+}
+
+impl GlassCache {
+    pub const fn new() -> Self {
+        Self {
+            rect: Rect::EMPTY,
+            tint: Color::TRANSPARENT,
+            pixels: Vec::new(),
+        }
+    }
+}
 
 /// The screen for one frame, plus the blurred wallpaper behind it.
 pub struct Frame<'a> {
@@ -70,6 +95,7 @@ impl Frame<'_> {
         }
 
         let lut = TintTable::new(tint, self.target.format());
+        let faded = (opacity < 255).then(|| lut.faded(opacity));
         let bpp = self.target.bytes_per_pixel();
 
         for py in y0..y1 {
@@ -87,22 +113,99 @@ impl Frame<'_> {
                 self.glass_pixel(px, py, x, y, w, h, r, tint, opacity);
             }
             if run_end > run_start {
-                if opacity == 255 {
-                    let src = self.blurred.row(py as usize);
-                    let dst = self.target.row_mut(py as usize);
-                    let from = run_start as usize * bpp;
-                    let to = run_end as usize * bpp;
-                    lut.apply(&src[from..to], &mut dst[from..to], bpp);
-                } else {
-                    // A panel that is still fading in has to blend against what
-                    // is behind it, so the table path cannot be used.
-                    for px in run_start..run_end {
-                        self.glass_pixel(px, py, x, y, w, h, r, tint, opacity);
-                    }
+                let src = self.blurred.row(py as usize);
+                let dst = self.target.row_mut(py as usize);
+                let from = run_start as usize * bpp;
+                let to = run_end as usize * bpp;
+                match &faded {
+                    None => lut.apply(&src[from..to], &mut dst[from..to], bpp),
+                    // A panel still fading in blends against what is behind
+                    // it, but the glass colour itself still comes straight
+                    // out of a table.
+                    Some(f) => f.apply(&src[from..to], &mut dst[from..to], bpp),
                 }
             }
             for px in run_end.max(run_start)..x1 {
                 self.glass_pixel(px, py, x, y, w, h, r, tint, opacity);
+            }
+        }
+    }
+
+    /// `glass_fill` for a panel that stays put: the table pass runs only when
+    /// the rectangle or tint differs from what the cache holds, and every
+    /// frame after that copies its interior rows straight out of the cache.
+    /// A fading panel still goes the live way.
+    #[allow(clippy::too_many_arguments)]
+    pub fn glass_fill_cached(
+        &mut self,
+        cache: &mut GlassCache,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        r: i32,
+        tint: Color,
+        opacity: u8,
+    ) {
+        if opacity < 255 {
+            return self.glass_fill(x, y, w, h, r, tint, opacity);
+        }
+        if w <= 0 || h <= 0 {
+            return;
+        }
+        let r = r.max(0).min(w / 2).min(h / 2);
+        let screen = Rect::new(0, 0, self.target.width() as i32, self.target.height() as i32);
+        let rect = Rect::from_size(x, y, w, h).intersect(&screen);
+        if rect.is_empty() {
+            return;
+        }
+        let bpp = self.target.bytes_per_pixel();
+        let rw = (rect.x1 - rect.x0) as usize;
+        let rh = (rect.y1 - rect.y0) as usize;
+
+        if cache.rect != rect || cache.tint != tint || cache.pixels.len() != rw * rh * bpp {
+            // Built for the whole rectangle regardless of the current clip, so
+            // every later region can be served from it.
+            let lut = TintTable::new(tint, self.target.format());
+            cache.pixels.clear();
+            cache.pixels.resize(rw * rh * bpp, 0);
+            for (i, py) in (rect.y0..rect.y1).enumerate() {
+                let src = &self.blurred.row(py as usize)[rect.x0 as usize * bpp..rect.x1 as usize * bpp];
+                let dst = &mut cache.pixels[i * rw * bpp..(i + 1) * rw * bpp];
+                lut.apply(src, dst, bpp);
+            }
+            cache.rect = rect;
+            cache.tint = tint;
+        }
+
+        let clip = self.target.clip();
+        let x0 = rect.x0.max(clip.x0);
+        let y0 = rect.y0.max(clip.y0);
+        let x1 = rect.x1.min(clip.x1);
+        let y1 = rect.y1.min(clip.y1);
+        if x1 <= x0 || y1 <= y0 {
+            return;
+        }
+        for py in y0..y1 {
+            let ly = py - y;
+            let (run_start, run_end) = if ly >= r && ly < h - r {
+                (x0, x1)
+            } else {
+                let inset = shapes::corner_inset(ly, h, r);
+                ((x + inset).max(x0), (x + w - inset).min(x1))
+            };
+            for px in x0..run_start {
+                self.glass_pixel(px, py, x, y, w, h, r, tint, 255);
+            }
+            if run_end > run_start {
+                let row = (py - rect.y0) as usize * rw * bpp;
+                let from = row + (run_start - rect.x0) as usize * bpp;
+                let to = row + (run_end - rect.x0) as usize * bpp;
+                let dst = self.target.row_mut(py as usize);
+                dst[run_start as usize * bpp..run_end as usize * bpp].copy_from_slice(&cache.pixels[from..to]);
+            }
+            for px in run_end.max(run_start)..x1 {
+                self.glass_pixel(px, py, x, y, w, h, r, tint, 255);
             }
         }
     }
@@ -134,6 +237,36 @@ impl Frame<'_> {
     }
 }
 
+struct FadedTable {
+    glass: [[u8; 256]; 3],
+    keep: [u8; 256],
+}
+
+impl FadedTable {
+    /// Three bytes per pixel is the case that matters, and spelling it out
+    /// with fixed-size chunks lets the compiler drop every bounds check from
+    /// the inner loop, which under emulation is most of its cost.
+    #[inline(always)]
+    fn apply(&self, src: &[u8], dst: &mut [u8], bpp: usize) {
+        if bpp == 3 {
+            let n = src.len().min(dst.len()) / 3;
+            for (d, s) in dst[..n * 3].chunks_exact_mut(3).zip(src[..n * 3].chunks_exact(3)) {
+                d[0] = self.glass[0][s[0] as usize] + self.keep[d[0] as usize];
+                d[1] = self.glass[1][s[1] as usize] + self.keep[d[1] as usize];
+                d[2] = self.glass[2][s[2] as usize] + self.keep[d[2] as usize];
+            }
+            return;
+        }
+        let n = src.len().min(dst.len()) / bpp;
+        for i in 0..n {
+            let o = i * bpp;
+            for c in 0..3 {
+                dst[o + c] = self.glass[c][src[o + c] as usize] + self.keep[dst[o + c] as usize];
+            }
+        }
+    }
+}
+
 /// Per-channel tables mapping a wallpaper byte to the tinted glass byte.
 struct TintTable {
     table: [[u8; 256]; 3],
@@ -157,8 +290,33 @@ impl TintTable {
         Self { table }
     }
 
+    /// The fade folded into tables as well: `glass * opacity` per channel and
+    /// `behind * (1 - opacity)` shared, so a fading pixel costs two lookups
+    /// and an add per byte instead of two multiplies.
+    fn faded(&self, opacity: u8) -> FadedTable {
+        let inv = 255 - opacity;
+        let mut glass = [[0u8; 256]; 3];
+        let mut keep = [0u8; 256];
+        for v in 0..256 {
+            keep[v] = mul255(v as u8, inv);
+            for c in 0..3 {
+                glass[c][v] = mul255(self.table[c][v], opacity);
+            }
+        }
+        FadedTable { glass, keep }
+    }
+
     #[inline(always)]
     fn apply(&self, src: &[u8], dst: &mut [u8], bpp: usize) {
+        if bpp == 3 {
+            let n = src.len().min(dst.len()) / 3;
+            for (d, s) in dst[..n * 3].chunks_exact_mut(3).zip(src[..n * 3].chunks_exact(3)) {
+                d[0] = self.table[0][s[0] as usize];
+                d[1] = self.table[1][s[1] as usize];
+                d[2] = self.table[2][s[2] as usize];
+            }
+            return;
+        }
         let n = src.len().min(dst.len()) / bpp;
         for i in 0..n {
             let o = i * bpp;
