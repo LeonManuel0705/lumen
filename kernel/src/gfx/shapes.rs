@@ -14,9 +14,6 @@ pub fn fill_rect<C: Canvas>(fb: &mut C, x: i32, y: i32, w: i32, h: i32, c: Color
     }
 }
 
-/// A rounded rect shaded from `top` to `bottom`, one colour per row. The plain
-/// `vertical_gradient` cannot do this: it ramps over the whole canvas height
-/// and fills the whole clip.
 pub fn fill_rounded_rect_vgrad<C: Canvas>(fb: &mut C, x: i32, y: i32, w: i32, h: i32, r: i32, top: Color, bottom: Color) {
     if w <= 0 || h <= 0 { return; }
     let r = r.max(0).min(w / 2).min(h / 2);
@@ -51,13 +48,6 @@ pub fn fill_rounded_rect_vgrad<C: Canvas>(fb: &mut C, x: i32, y: i32, w: i32, h:
     }
 }
 
-/// How far in from the edge a row of a rounded rect is fully inside the shape.
-/// Rows between the arcs are straight and can be filled in one run.
-///
-/// The answer is checked against the rasteriser rather than derived from the
-/// circle equation alone. An analytic inset is off by up to a pixel from where
-/// the antialiaser actually reaches full coverage, and filling that pixel
-/// solid is exactly the hard edge the antialiasing exists to avoid.
 pub fn corner_inset(ly: i32, h: i32, r: i32) -> i32 {
     if r <= 0 {
         return 0;
@@ -72,7 +62,6 @@ pub fn corner_inset(ly: i32, h: i32, r: i32) -> i32 {
 
     let dy = (ly - cy).abs().max(1) as i64;
     let rr = r as i64;
-    // Start from the circle equation, then walk out to where coverage is solid.
     let mut inset = 0;
     while inset < r {
         let dx = rr - inset as i64;
@@ -244,22 +233,12 @@ pub fn fill_circle<C: Canvas>(fb: &mut C, cx: i32, cy: i32, r: i32, c: Color) {
     }
 }
 
-/// How much of pixel (`px`, `py`) a circle of radius `r` centred on (`cx`,
-/// `cy`) covers, from 0 to 255.
-///
-/// The convention for the whole module: a pixel with index n covers the span
-/// `[n, n+1)`, and shape coordinates are the grid between pixels. Sampling a
-/// pixel as if it were centred on its own index instead would put every arc
-/// half a pixel away from the straight edges it has to meet.
 fn circle_coverage(px: i32, py: i32, cx: i32, cy: i32, r: i32) -> u8 {
     const SAMPLES: i32 = 4;
     const STEP: i64 = 256 / SAMPLES as i64;
-    /// Half a pixel diagonal, in 1/256ths: the most a pixel's corner can be
-    /// from its centre, which makes the accept and reject tests exact.
     const HALF_DIAGONAL: i64 = 181;
 
     let r256 = r as i64 * 256;
-    // Offset of the pixel's centre from the circle's centre.
     let dx = (px - cx) as i64 * 256 + 128;
     let dy = (py - cy) as i64 * 256 + 128;
     let d2 = dx * dx + dy * dy;
@@ -308,13 +287,6 @@ pub fn draw_line<C: Canvas>(fb: &mut C, x0: i32, y0: i32, x1: i32, y1: i32, c: C
     }
 }
 
-/// A soft shadow around a rounded rect, drawn only where the panel will not
-/// cover it. The falloff is separable, one weight per column times one per row,
-/// which means the band directly above and below the panel has a single alpha
-/// for the whole run and can be filled without touching pixels one at a time.
-/// How far past its own rectangle a panel's shadow reaches. Damage rectangles
-/// are derived from this rather than from a second copy of the numbers, so a
-/// change to the shadow cannot leave a smear behind it.
 pub fn shadow_bounds(x: i32, y: i32, w: i32, h: i32) -> Rect {
     Rect::new(
         x - SHADOW_SPREAD,
@@ -351,8 +323,6 @@ pub fn drop_shadow<C: Canvas>(fb: &mut C, x: i32, y: i32, w: i32, h: i32, r: i32
         if fy == 0 {
             continue;
         }
-        // Rows above and below the panel borrow the width of the nearest row
-        // of the shape, so the shadow keeps the panel's rounded ends.
         let ly = (py - y).clamp(0, h - 1);
         let inset = corner_inset(ly, h, r);
         let span_start = x + inset;
@@ -360,9 +330,6 @@ pub fn drop_shadow<C: Canvas>(fb: &mut C, x: i32, y: i32, w: i32, h: i32, r: i32
         let mid_start = span_start.max(x0);
         let mid_end = (span_start + span_len).min(x1);
 
-        // The side segments have a different alpha per column, but they are
-        // short, so a strip of colours through the row blender beats a
-        // decode and encode per pixel.
         let mut strip = [Color::TRANSPARENT; SPREAD as usize * 2 + 2];
         if mid_start > x0 {
             let n = ((mid_start - x0) as usize).min(strip.len());
@@ -372,7 +339,6 @@ pub fn drop_shadow<C: Canvas>(fb: &mut C, x: i32, y: i32, w: i32, h: i32, r: i32
             fb.blend_row(x0 as usize, py as usize, &strip[..n], 255);
         }
 
-        // Whatever the panel itself covers is not worth shading.
         if mid_end > mid_start && (py < y || py >= y + h) {
             let c = shade(255, fy);
             if c.a > 0 {
@@ -391,7 +357,6 @@ pub fn drop_shadow<C: Canvas>(fb: &mut C, x: i32, y: i32, w: i32, h: i32, r: i32
     }
 }
 
-/// 255 inside the span, easing to 0 over `spread` pixels outside it.
 #[inline(always)]
 fn falloff(v: i32, start: i32, len: i32, spread: i32) -> u8 {
     let d = if v < start {
@@ -443,9 +408,6 @@ pub fn cloud<C: Canvas>(fb: &mut C, cx: i32, cy: i32, scale: i32, color: Color) 
     }
 }
 
-/// The rim light and border of a frosted panel. The tinted backdrop below it
-/// comes from the frame's glass cache and the shadow from `drop_shadow`, so
-/// this layer can go on top of anything.
 pub fn glass_highlights<C: Canvas>(fb: &mut C, x: i32, y: i32, w: i32, h: i32, r: i32, strength: u8) {
     let inset = r.max(2);
     let scaled = |a: u32| ((a * strength as u32) / 255) as u8;
@@ -466,8 +428,6 @@ pub fn stroke_rounded_rect<C: Canvas>(fb: &mut C, x: i32, y: i32, w: i32, h: i32
         if px < bx0 || py < by0 || px >= bx1 || py >= by1 {
             return;
         }
-        // The border is whatever the full shape covers that the shape shrunk
-        // by one pixel does not.
         let full = rounded_coverage_signed(px - x, py - y, w, h, r, 0);
         let inset = rounded_coverage_signed(px - x, py - y, w, h, r, 1);
         let edge = full.saturating_sub(inset);
@@ -475,8 +435,6 @@ pub fn stroke_rounded_rect<C: Canvas>(fb: &mut C, x: i32, y: i32, w: i32, h: i32
         fb.blend_pixel(px as usize, py as usize, c.fade(edge));
     };
 
-    // Only the outermost ring can be on the border. Straight rows need their
-    // two edge columns; corner rows need the arc bands as well.
     for py in y..(y + h) {
         let ly = py - y;
         let side = if ly <= 1 || ly >= h - 2 {

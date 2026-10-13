@@ -13,17 +13,12 @@ const PANEL_W: i32 = 560;
 const PANEL_H: i32 = 84;
 const PANEL_R: i32 = 26;
 const PANEL_BOTTOM_MARGIN: i32 = 22;
-/// 5 pitches + one icon + this on both sides is exactly PANEL_W.
 const PAD: i32 = 24;
-/// Where every icon's bottom edge rests: `panel.y0 + (PANEL_H + ICON) / 2`.
 const BASELINE_INSET: i32 = (PANEL_H + ICON as i32) / 2;
-/// The contact shadow sits on the dock floor, two pixels under the baseline.
 const FLOOR_OFFSET: i32 = 2;
-/// The running pill sits below the icons, on the panel.
 const IND_INSET: i32 = 74;
 const IND_H: i32 = 5;
 
-/// How far from an icon's centre the cursor still swells it, and by how much.
 const R_FIELD: f32 = 150.0;
 const GROWTH: f32 = 0.54;
 const SPREAD_K: f32 = 20.8;
@@ -42,9 +37,6 @@ const APPS: [Option<AppKind>; SLOTS] = [
     None,
 ];
 
-/// What the tooltip says. The dot after a name means the app is on the
-/// roadmap and not built yet, and it is on screen before the click, so a
-/// refusal confirms something the user was already told.
 const LABELS: [&str; SLOTS] = [
     "Ball",
     "Uhr",
@@ -57,22 +49,11 @@ const LABELS: [&str; SLOTS] = [
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub enum DockAction {
     None,
-    /// The press landed on the dock but on no icon: the glass is a surface.
     Consumed,
     Launch(AppKind),
     Denied,
 }
 
-/// Everything `draw` needs to paint one slot, and nothing else. Every field is
-/// an integer pixel or an 8-bit alpha, which is the whole trick: springs never
-/// quite reach their target, but the moment one is within half a pixel of it
-/// this signature stops changing, so an idle dock reports no damage without a
-/// single epsilon anywhere.
-///
-/// That only holds if the values are rounded, not truncated. The rest
-/// geometry lands on exact integers, so truncation would turn the sign of a
-/// spring that has decayed to a millionth into a whole pixel every time it
-/// rings through zero.
 #[derive(Copy, Clone, PartialEq, Eq, Default)]
 struct SlotVisual {
     live: bool,
@@ -94,8 +75,6 @@ struct SlotVisual {
     ind_a: u8,
 }
 
-/// Nearest-integer quantisation. `as i32` truncates toward zero, which puts
-/// the decision boundary exactly on the rest values.
 fn qi(v: f32) -> i32 {
     if v >= 0.0 { (v + 0.5) as i32 } else { (v - 0.5) as i32 }
 }
@@ -170,9 +149,6 @@ impl Slot {
         (1.0 - u) * (1.0 - u)
     }
 
-    /// A head-shake: a rounded triangle wave under a decaying envelope. There
-    /// is no sine and a spring cannot do three clean passes, so this is a
-    /// phase timer, which also means it stops at exactly zero.
     fn shake_offset(&self) -> f32 {
         if self.shake_t >= SHAKE_DUR {
             return 0.0;
@@ -186,14 +162,10 @@ impl Slot {
     }
 }
 
-/// The launcher strip along the bottom of the desktop: a glass panel with one
-/// plate per app slot, a magnification field under the cursor, and honest
-/// feedback for everything that can be clicked.
 pub struct Dock {
     panel: Rect,
     presence: f32,
     slots: [Slot; SLOTS],
-    /// 0 closed, 1 open, 2 focused, straight from the window manager.
     state: [u8; SLOTS],
     hovered: Option<usize>,
     dwell: f32,
@@ -241,8 +213,6 @@ impl Dock {
         APPS.get(slot).copied().flatten()
     }
 
-    /// The x every icon's centre rests at. Fixed forever: everything that
-    /// moves is measured from here.
     fn home_cx(&self, slot: usize) -> f32 {
         (self.panel.x0 + PAD) as f32 + ICON * 0.5 + PITCH * slot as f32
     }
@@ -269,11 +239,6 @@ impl Dock {
         }
     }
 
-    /// The slot under a point, tested against rest cells and never against
-    /// the animated tiles. Magnification is a function of the cursor, so
-    /// testing a magnified box would make the target depend on whether it is
-    /// already hit; rest cells tile the row with no dead pixel, and the band
-    /// reaches above the panel so a grown icon's whole silhouette counts.
     pub fn slot_at(&self, px: f32, py: f32) -> Option<usize> {
         if py < (self.panel.y0 - 22) as f32 || py >= self.panel.y1 as f32 {
             return None;
@@ -293,8 +258,6 @@ impl Dock {
         px >= self.panel.x0 as f32 && px < self.panel.x1 as f32 && py >= self.panel.y0 as f32 && py < self.panel.y1 as f32
     }
 
-    /// The one path a click and a number key share, so mouse and keyboard
-    /// launches are frame for frame the same animation.
     pub fn activate(&mut self, slot: usize) -> DockAction {
         let running = self.state[slot] != 0;
         self.tip_slot = slot as u8;
@@ -306,8 +269,6 @@ impl Dock {
         s.squash.nudge(-9.0);
         match Self::app_in_slot(slot) {
             Some(kind) => {
-                // A raise is a different verb from a launch: one small tap
-                // instead of the full two-hop bounce.
                 s.bounce_v0 = if running { 200.0 } else { 360.0 };
                 s.bounce_hops = if running { 0 } else { 1 };
                 if !running {
@@ -323,8 +284,6 @@ impl Dock {
         }
     }
 
-    /// A keyboard launch has no cursor at the icon to draw the eye, so it
-    /// also presses the plate and swells it briefly.
     pub fn activate_from_keyboard(&mut self, slot: usize) -> DockAction {
         let action = self.activate(slot);
         let s = &mut self.slots[slot];
@@ -341,13 +300,10 @@ impl Dock {
         self.landing.take()
     }
 
-    /// The cursor picks up the colour of the icon it is over.
     pub fn hover_tint(&self) -> Option<Color> {
         self.hovered.map(|i| icons::PLATES[i].indicator)
     }
 
-    /// Advances every spring and timer and rebuilds the visuals `draw` will
-    /// read. Runs once per simulation step; only the final state is drawn.
     pub fn update(
         &mut self,
         dt: f32,
@@ -359,7 +315,6 @@ impl Dock {
     ) -> DockAction {
         self.state = *state;
 
-        // The press comes first so the depress shows on the frame it happens.
         let mut action = DockAction::None;
         if pressed && interactive {
             if let Some(slot) = self.slot_at(cursor.0, cursor.1) {
@@ -373,9 +328,6 @@ impl Dock {
             self.held = None;
         }
 
-        // The magnification field: a quartic bump in x, gated by how close the
-        // cursor is to the panel in y, so reaching for the dock starts the
-        // swell before the pointer arrives.
         let gate_top = (self.panel.y0 - 8) as f32;
         let vertical = if cursor.1 >= gate_top {
             1.0
@@ -397,8 +349,6 @@ impl Dock {
             let pressing = self.held == Some(i) || slot.press_hold > 0.0;
             slot.press.set_target(if pressing { 1.0 } else { 0.0 });
 
-            // The pill waits for the launch bounce to land before it grows,
-            // so the splat and the pill read as cause and effect.
             let ind_target = if slot.run_delay > 0.0 {
                 0.0
             } else {
@@ -423,8 +373,6 @@ impl Dock {
                 slot.shake_t = (slot.shake_t + dt).min(SHAKE_DUR);
             }
 
-            // Ballistics rather than a spring, because a spring cannot land,
-            // and the landing is what drives the squash and the shockwave.
             if slot.bouncing {
                 if slot.bounce_delay > 0.0 {
                     slot.bounce_delay -= dt;
@@ -453,7 +401,6 @@ impl Dock {
             }
         }
 
-        // Hover is the strongest field, and only when it is clearly one icon.
         let mut hovered = None;
         let mut best = 0.55f32;
         for (i, f) in fields.iter().enumerate() {
@@ -469,9 +416,6 @@ impl Dock {
             self.dwell = 0.0;
         }
 
-        // The tooltip needs a moment of dwell so it does not flash while the
-        // cursor sweeps past, but once it is up it slides along the row rather
-        // than fading out and in at every icon.
         self.tip_hold = (self.tip_hold - dt).max(0.0);
         let visible = self.tip_alpha.current > 0.05;
         if let Some(h) = hovered {
@@ -493,7 +437,6 @@ impl Dock {
         action
     }
 
-    /// Everything `draw` will read, computed once and quantised.
     fn rebuild_visuals(&mut self, cursor: (f32, f32)) {
         let panel_lift = qi((1.0 - self.presence) * 40.0);
         self.panel_vis = PanelVisual {
@@ -502,7 +445,6 @@ impl Dock {
         };
 
         let baseline = self.baseline();
-        // The shadow floor and the pill ride with the panel while it enters.
         let floor_y = self.floor_y() + panel_lift;
         let ind_y = self.ind_y() + panel_lift;
         for i in 0..SLOTS {
@@ -580,8 +522,6 @@ impl Dock {
             .union(&shapes::shadow_bounds(self.panel.x0, v.y, PANEL_W, PANEL_H))
     }
 
-    /// A stated superset of every pixel `draw_slot` can touch: the plate with
-    /// its rim and refusal ring, the contact shadow, and the pill.
     fn slot_bounds(&self, v: &SlotVisual) -> Rect {
         if !v.live {
             return Rect::EMPTY;
@@ -604,10 +544,6 @@ impl Dock {
         Rect::from_size(v.cx - v.w / 2 - 2, v.y - 2, v.w + 4, 34)
     }
 
-    /// Reports one rectangle covering everything that changed since the last
-    /// frame, old position and new, and only then remembers the new state as
-    /// drawn. That order is the whole guarantee: the old rectangle is always
-    /// available because `drawn` is always exactly what was last painted.
     pub fn damage(&mut self, into: &mut Damage) {
         let mut r = Rect::EMPTY;
         if self.panel_vis != self.panel_drawn {
@@ -630,8 +566,6 @@ impl Dock {
         }
     }
 
-    /// Resynchronises without reporting, for the modes where the shell
-    /// repaints the whole screen anyway.
     pub fn forget(&mut self) {
         self.panel_drawn = self.panel_vis;
         for slot in self.slots.iter_mut() {
@@ -640,9 +574,6 @@ impl Dock {
         self.tip_drawn = self.tip_vis;
     }
 
-    /// Paints from the visuals alone. Nothing here may read a spring, a timer
-    /// or the cursor: equal visuals must mean equal pixels, or the damage
-    /// bookkeeping is a hope rather than a guarantee.
     pub fn draw(&self, frame: &mut Frame) {
         let panel = self.panel_vis;
         if panel.alpha == 0 {

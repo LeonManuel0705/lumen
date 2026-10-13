@@ -6,22 +6,15 @@ use spin::Mutex;
 use crate::gfx::color::mul255;
 use crate::gfx::{shapes, Canvas, Color, Damage, Framebuffer, Rect};
 
-/// How far the wallpaper is smeared for the frosted-glass cache. Two passes of
-/// a box blur at this radius is a close enough gaussian at this scale.
 const GLASS_RADIUS: usize = 16;
 const GLASS_PASSES: usize = 2;
 
 struct Display {
     front: *mut u8,
     info: FrameBufferInfo,
-    /// What the next frame is assembled in before it is shown.
     back: Vec<u8>,
-    /// The wallpaper, drawn once, copied in at the start of every frame.
     background: Vec<u8>,
-    /// The same wallpaper pre-blurred. Glass panels read from here instead of
-    /// blurring the screen live, which is what keeps them cheap enough to move.
     blurred: Vec<u8>,
-    /// Scratch space for the damage self-test: a full redraw to compare against.
     check: Vec<u8>,
 }
 
@@ -29,14 +22,6 @@ unsafe impl Send for Display {}
 
 static DISPLAY: Mutex<Option<Display>> = Mutex::new(None);
 
-/// The tinted, blurred wallpaper under one panel, kept between frames.
-///
-/// Glass at rest never changes: it is a function of the wallpaper, which is
-/// baked once, and of the panel's rectangle and tint. Recomputing it through
-/// the tint table every frame was the single largest cost of a full repaint,
-/// so a panel keeps its last result and copies rows out of it until it moves
-/// or changes colour. Anything that re-bakes the wallpaper must drop every
-/// one of these.
 pub struct GlassCache {
     rect: Rect,
     tint: Color,
@@ -53,21 +38,12 @@ impl GlassCache {
     }
 }
 
-/// The screen for one frame, plus the blurred wallpaper behind it.
 pub struct Frame<'a> {
     target: Framebuffer<'a>,
     blurred: Framebuffer<'a>,
 }
 
 impl Frame<'_> {
-    /// Lays the blurred wallpaper into a rounded rectangle and tints it in the
-    /// same pass. The rim light and border go on top afterwards.
-    ///
-    /// The inside of the shape is the hot loop of the whole compositor, so the
-    /// tint is folded into three 256-entry tables first: every interior pixel
-    /// is then three table lookups and three byte writes, with no blending
-    /// arithmetic and no per-pixel format decision at all. Only the
-    /// antialiased rim takes the general path.
     pub fn glass_fill(
         &mut self,
         x: i32,
@@ -99,8 +75,6 @@ impl Frame<'_> {
         let bpp = self.target.bytes_per_pixel();
 
         for py in y0..y1 {
-            // Inside the vertical straight section every pixel between the
-            // corners is fully covered, so the run can be done wholesale.
             let ly = py - y;
             let (run_start, run_end) = if ly >= r && ly < h - r {
                 (x0, x1)
@@ -119,9 +93,6 @@ impl Frame<'_> {
                 let to = run_end as usize * bpp;
                 match &faded {
                     None => lut.apply(&src[from..to], &mut dst[from..to], bpp),
-                    // A panel still fading in blends against what is behind
-                    // it, but the glass colour itself still comes straight
-                    // out of a table.
                     Some(f) => f.apply(&src[from..to], &mut dst[from..to], bpp),
                 }
             }
@@ -131,10 +102,6 @@ impl Frame<'_> {
         }
     }
 
-    /// `glass_fill` for a panel that stays put: the table pass runs only when
-    /// the rectangle or tint differs from what the cache holds, and every
-    /// frame after that copies its interior rows straight out of the cache.
-    /// A fading panel still goes the live way.
     #[allow(clippy::too_many_arguments)]
     pub fn glass_fill_cached(
         &mut self,
@@ -164,8 +131,6 @@ impl Frame<'_> {
         let rh = (rect.y1 - rect.y0) as usize;
 
         if cache.rect != rect || cache.tint != tint || cache.pixels.len() != rw * rh * bpp {
-            // Built for the whole rectangle regardless of the current clip, so
-            // every later region can be served from it.
             let lut = TintTable::new(tint, self.target.format());
             cache.pixels.clear();
             cache.pixels.resize(rw * rh * bpp, 0);
@@ -243,9 +208,6 @@ struct FadedTable {
 }
 
 impl FadedTable {
-    /// Three bytes per pixel is the case that matters, and spelling it out
-    /// with fixed-size chunks lets the compiler drop every bounds check from
-    /// the inner loop, which under emulation is most of its cost.
     #[inline(always)]
     fn apply(&self, src: &[u8], dst: &mut [u8], bpp: usize) {
         if bpp == 3 {
@@ -267,7 +229,6 @@ impl FadedTable {
     }
 }
 
-/// Per-channel tables mapping a wallpaper byte to the tinted glass byte.
 struct TintTable {
     table: [[u8; 256]; 3],
 }
@@ -290,9 +251,6 @@ impl TintTable {
         Self { table }
     }
 
-    /// The fade folded into tables as well: `glass * opacity` per channel and
-    /// `behind * (1 - opacity)` shared, so a fading pixel costs two lookups
-    /// and an add per byte instead of two multiplies.
     fn faded(&self, opacity: u8) -> FadedTable {
         let inv = 255 - opacity;
         let mut glass = [[0u8; 256]; 3];
@@ -385,20 +343,10 @@ pub fn init(fb: &'static mut BootFb) {
 pub fn dimensions() -> Option<(usize, usize)> {
     DISPLAY.lock().as_ref().map(|d| {
         let stride = d.info.stride * d.info.bytes_per_pixel;
-        // Never report rows the buffers cannot actually back: a row that gets
-        // silently skipped during a present is stale until something else
-        // happens to damage it, which may be never.
         (d.info.width, d.info.height.min(d.back.len() / stride.max(1)))
     })
 }
 
-/// Redraws the whole scene from scratch into scratch space and compares it with
-/// what damage tracking actually produced. Returns the first pixel that
-/// disagrees, which is a region somebody forgot to claim.
-///
-/// This is the check that makes the whole scheme trustworthy: a missed damage
-/// rectangle is otherwise invisible until a human happens to look at the right
-/// part of the screen at the right moment.
 pub fn verify<F: Fn(&mut Frame)>(f: F) -> Option<(usize, usize)> {
     let mut guard = DISPLAY.lock();
     let display = guard.as_mut()?;
@@ -425,12 +373,6 @@ pub fn verify<F: Fn(&mut Frame)>(f: F) -> Option<(usize, usize)> {
     None
 }
 
-/// Draws the wallpaper once and refreshes the blurred copy the glass reads
-/// from. Expensive on purpose: it happens at boot, not per frame.
-///
-/// Anything that calls this again must mark the whole screen damaged in the
-/// same breath: the back buffer's untouched regions would otherwise still hold
-/// pixels composed against the old wallpaper.
 pub fn bake_background<F: FnOnce(&mut Framebuffer)>(f: F) {
     let mut guard = DISPLAY.lock();
     let display = match guard.as_mut() {
@@ -448,12 +390,6 @@ pub fn bake_background<F: FnOnce(&mut Framebuffer)>(f: F) {
     crate::gfx::blur::box_blur_region(&mut blurred, 0, 0, w, h, GLASS_RADIUS, GLASS_PASSES);
 }
 
-/// Repaints only the damaged regions and shows only those.
-///
-/// The back buffer is never cleared between frames: whatever was presented last
-/// frame is still in it, so a region that nobody damaged is already correct.
-/// Each damaged region is restored from the wallpaper, redrawn with the clip
-/// set to that region, and copied out to the screen.
 pub fn render<F: Fn(&mut Frame)>(damage: &Damage, f: F) {
     let mut guard = DISPLAY.lock();
     let display = match guard.as_mut() {

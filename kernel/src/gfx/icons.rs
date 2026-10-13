@@ -1,6 +1,5 @@
 use super::{shapes, Canvas, Color};
 
-/// The colours one dock plate is built from.
 #[derive(Copy, Clone)]
 pub struct Plate {
     pub top: Color,
@@ -9,10 +8,6 @@ pub struct Plate {
     pub indicator: Color,
 }
 
-/// One plate per slot. The lightness rhythm across the row was fixed before
-/// the hues were: bright, deep, paper, ink, slate, sky. Two warms, one paper,
-/// three cools, and amber somewhere inside every emblem, which is the thread
-/// that makes six different marks one family instead of six stickers.
 pub const PLATES: [Plate; 6] = [
     Plate { top: Color::rgb(255, 209, 116), bottom: Color::rgb(243, 152, 52), rim: Color::rgba(168, 96, 24, 165), indicator: Color::rgb(255, 186, 92) },
     Plate { top: Color::rgb(104, 158, 240), bottom: Color::rgb(48, 88, 188), rim: Color::rgba(28, 52, 124, 165), indicator: Color::rgb(96, 158, 236) },
@@ -22,10 +17,6 @@ pub const PLATES: [Plate; 6] = [
     Plate { top: Color::rgb(150, 212, 248), bottom: Color::rgb(74, 158, 226), rim: Color::rgba(36, 104, 168, 165), indicator: Color::rgb(96, 180, 240) },
 ];
 
-/// Maps the 52-unit design cell every emblem is authored in onto the tile as
-/// it is actually drawn, which may be larger, squashed, or fading. Keeping the
-/// recipes in one fixed space is what lets a tile be 52 or 80 pixels without
-/// anyone redrawing the artwork.
 struct Cell {
     x: f32,
     y: f32,
@@ -71,9 +62,6 @@ const WHITE: Color = Color::WHITE;
 const INK: Color = Color::rgb(22, 52, 94);
 const AMBER: Color = Color::rgb(243, 168, 58);
 
-/// Draws one slot's plate and emblem into the box (`x`, `y`, `w`, `h`).
-/// `emb` is the emblem's own phase, 0 at rest and 255 fully awake, which every
-/// live detail (a climbing ball, a sliding knob, a drifting cloud) reads from.
 #[allow(clippy::too_many_arguments)]
 pub fn draw_slot<C: Canvas>(fb: &mut C, slot: usize, x: i32, y: i32, w: i32, h: i32, alpha: u8, emb: u8) {
     if w <= 0 || h <= 0 || alpha == 0 {
@@ -100,9 +88,6 @@ pub fn draw_slot<C: Canvas>(fb: &mut C, slot: usize, x: i32, y: i32, w: i32, h: 
     }
 }
 
-/// The mascot mid-bounce: one big white disc over one white bar, and nothing
-/// else in the set has a bar at the bottom edge. On hover it climbs out of
-/// its own trail. It stays a perfect circle; squash is motion's job.
 fn ball<C: Canvas>(fb: &mut C, c: &Cell, e: f32) {
     c.bar(fb, 11.0, 38.5, 30.0, 3.0, 1.5, WHITE.with_alpha(232));
     c.oval(fb, 26.0, 37.5, 10.0 - 3.0 * e, 2.6, Color::rgba(150, 72, 8, 110));
@@ -113,8 +98,6 @@ fn ball<C: Canvas>(fb: &mut C, c: &Cell, e: f32) {
     c.disc(fb, 26.0, 25.5 - 4.0 * e, 5.5, Color::rgba(246, 166, 66, 86));
 }
 
-/// A dial at 12:15. Hands are axis-aligned because there is no rotation, and
-/// the minute hand is longer than the hour so it cannot read as a plus sign.
 fn clock<C: Canvas>(fb: &mut C, c: &Cell, e: f32) {
     c.disc(fb, 26.0, 25.5, 11.5, WHITE.with_alpha(30));
     c.ring(fb, 26.0, 25.5, 13.0, 3.0, WHITE.with_alpha(238));
@@ -128,9 +111,6 @@ fn clock<C: Canvas>(fb: &mut C, c: &Cell, e: f32) {
     }
 }
 
-/// Three gels mixing on warm paper. Alpha 180 over a base lighter than the
-/// discs means the overlaps come out saturated, never muddy: the icon performs
-/// its own function. The only polychrome emblem, because colour is its subject.
 fn colours<C: Canvas>(fb: &mut C, c: &Cell, e: f32) {
     c.disc(fb, 20.0 - 2.0 * e, 31.0 + 1.0 * e, 9.4, Color::rgba(255, 186, 60, 180));
     c.disc(fb, 32.0 + 2.0 * e, 31.0 + 1.0 * e, 9.4, Color::rgba(74, 168, 240, 180));
@@ -139,10 +119,6 @@ fn colours<C: Canvas>(fb: &mut C, c: &Cell, e: f32) {
     c.oval(fb, 26.0, 41.5, 12.0, 2.2, Color::rgba(150, 132, 108, 80));
 }
 
-/// A pen stroke as a chain of overlapping discs with a growing radius, which
-/// is the only honest curve this primitive set can draw, and it gives a
-/// pressure-varying line for free. On hover the head extends and the nib
-/// glow blooms.
 fn sketch<C: Canvas>(fb: &mut C, c: &Cell, e: f32) {
     shapes::stroke_rounded_rect(fb, c.px(9.0), c.py(9.0), c.sx(34.0), c.sy(34.0), c.sm(7.0), WHITE.with_alpha(52).fade(c.alpha));
 
@@ -172,9 +148,6 @@ fn quad(p0: (f32, f32), p1: (f32, f32), p2: (f32, f32), t: f32) -> (f32, f32) {
     )
 }
 
-/// Two sliders. A gear needs rotation and a gear made of circles looks cheap;
-/// a mixer is what settings are, and it is the one emblem that visibly
-/// operates itself. The amber knob is the theme swatch.
 fn settings<C: Canvas>(fb: &mut C, c: &Cell, e: f32) {
     let e1 = ((e - 0.18) / 0.82).clamp(0.0, 1.0);
     let ka = 32.0 - 10.0 * e;
@@ -191,9 +164,6 @@ fn settings<C: Canvas>(fb: &mut C, c: &Cell, e: f32) {
     c.ring(fb, kb, 32.5, 6.2, 1.0, Color::rgba(140, 86, 10, 90));
 }
 
-/// Sun behind cloud: the wallpaper in miniature, built from its own two-ring
-/// sun. The cloud is seven discs written here rather than `shapes::cloud`,
-/// whose integer scale would pop four times while the icon grows.
 fn weather<C: Canvas>(fb: &mut C, c: &Cell, e: f32) {
     c.glow(fb, 33.0, 18.5, 12.0 + 3.0 * e, Color::rgba(255, 226, 150, (110.0 + 40.0 * e) as u8));
     c.disc(fb, 33.0, 18.5, 7.6, Color::LUMEN_ACCENT);

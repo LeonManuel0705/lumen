@@ -1,24 +1,11 @@
 use super::Rect;
 
-/// How many separate regions a frame may repaint before they start getting
-/// merged. Each region costs a background restore and a present, so a handful
-/// of tight rectangles beats a long list of tiny ones.
 pub const MAX_REGIONS: usize = 8;
 
-/// Above this share of the screen, tracking regions stops paying for itself and
-/// the frame is repainted whole.
 const FULL_SCREEN_FRACTION: i64 = 70;
 
-/// Two overlapping regions are merged only if their union is at most this
-/// much larger than the two together.
 const MERGE_SLACK_PERCENT: i64 = 130;
 
-/// The regions of the screen that changed this frame.
-///
-/// The invariant the whole scheme rests on: the back buffer always holds the
-/// last frame that was presented. So a region only needs repainting if
-/// something will be drawn there this frame, or something was drawn there last
-/// frame and has since moved away.
 #[derive(Copy, Clone)]
 pub struct Damage {
     regions: [Rect; MAX_REGIONS],
@@ -60,13 +47,6 @@ impl Damage {
             return;
         }
 
-        // Fold into an overlapping region when the union wastes little: a
-        // window's rectangle from one frame to the next, say. Two far-apart
-        // regions bridged by a small one must stay apart, or the box around
-        // them drags everything in between into the repaint. Regions may
-        // overlap as a result; overlap costs double work, never a wrong
-        // pixel. Merging can make the merged region overlap a third, so keep
-        // folding until it settles.
         let mut candidate = rect;
         let mut i = 0;
         while i < self.len {
@@ -84,7 +64,6 @@ impl Damage {
             self.regions[self.len] = candidate;
             self.len += 1;
         } else {
-            // Full: grow whichever region swallows it most cheaply.
             let mut best = 0;
             let mut best_cost = i64::MAX;
             for i in 0..self.len {
@@ -95,7 +74,6 @@ impl Damage {
                 }
             }
             self.regions[best] = self.regions[best].union(&candidate);
-            // The region just grew and may now reach a third one.
             let grown = self.regions[best];
             self.len -= 1;
             self.regions[best] = self.regions[self.len];
@@ -130,7 +108,6 @@ impl Damage {
         (0..self.len).map(|i| self.regions[i].area()).sum()
     }
 
-    /// The regions to repaint, in no particular order.
     pub fn regions(&self) -> &[Rect] {
         if self.full {
             core::slice::from_ref(&self.screen)

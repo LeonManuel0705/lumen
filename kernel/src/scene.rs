@@ -17,8 +17,6 @@ enum ShellMode {
 
 const FLOOR_FROM_BOTTOM: f32 = 110.0;
 const MAX_RIPPLES: usize = 8;
-/// Matches the reach of the shadow the shapes module draws.
-/// How far the lock screen's entrance lifts its contents.
 const LOCK_RISE: i32 = 26;
 const RIPPLE_LIFETIME: f32 = 0.95;
 
@@ -60,13 +58,8 @@ pub struct Scene {
     windows: WindowManager,
     dock: Dock,
     damage: Damage,
-    /// Where the cursor was drawn last, so a still cursor costs nothing.
     last_cursor: (i32, i32),
-    /// The colour it was drawn in, which the dock can change without the
-    /// cursor moving a pixel.
     last_tint: Color,
-    /// Set when the date string changes, which is otherwise pixel-identical
-    /// from one frame to the next.
     date_dirty: bool,
     bar_glass: RefCell<GlassCache>,
 }
@@ -107,9 +100,6 @@ impl Scene {
         }
     }
 
-    /// Closes out a frame: draws the app surfaces once, works out what changed,
-    /// and hands the regions over. Simulation may have stepped several times to
-    /// get here, but only the state it ended on is ever drawn.
     pub fn finish_frame(&mut self) -> Damage {
         if self.mode != ShellMode::Locked {
             self.windows.render_surfaces();
@@ -124,7 +114,6 @@ impl Scene {
         self.damage.mark_all();
     }
 
-    /// Over the dock the cursor picks up the colour of the icon under it.
     fn cursor_tint(&self) -> Color {
         self.dock.hover_tint().unwrap_or(Color::LUMEN_ACCENT)
     }
@@ -133,17 +122,12 @@ impl Scene {
         Rect::from_size(at.0 - 24, at.1 - 24, 48, 48)
     }
 
-    /// The pixels the top bar's clock can occupy, including the vertical room
-    /// the digit roll needs above and below the baseline.
     fn top_clock_rect(&self) -> Rect {
         let (bx, by, bw, bh) = self.top_bar_rect();
         let baseline = by + (bh + self.top_clock.digit_height()) / 2;
         self.top_clock.changed_rect(bx + bw / 2, baseline)
     }
 
-    /// The lock screen's three moving parts. The entrance lifts everything by
-    /// up to LOCK_RISE, so every band has to cover its whole travel or the
-    /// bottom of it smears on the way in.
     fn lock_rects(&self) -> (Rect, Rect, Rect) {
         let cx = (self.width * 0.5) as i32;
         let baseline = (self.height * 0.382) as i32;
@@ -187,14 +171,11 @@ impl Scene {
         self.unlock.restart();
         self.clock_entrance.restart();
         self.dock.begin_entrance();
-        // The desktop arrives with something on it, one window after the other.
         self.windows.open(AppKind::Ball, self.width * 0.19, self.height * 0.28, 0.24);
         self.windows.open(AppKind::Clock, self.width * 0.63, self.height * 0.34, 0.44);
     }
 
 
-    /// True when a point is on the shell's own chrome, which sits above every
-    /// window and therefore swallows the press.
     fn chrome_hit(&self, px: f32, py: f32) -> bool {
         let inside = |(x, y, w, h): (i32, i32, i32, i32)| {
             px >= x as f32 && px < (x + w) as f32 && py >= y as f32 && py < (y + h) as f32
@@ -202,9 +183,6 @@ impl Scene {
         inside(self.top_bar_rect())
     }
 
-    /// What the window manager says about each slot's app: closed, open, or
-    /// focused. Derived every frame and never remembered, so a window closed
-    /// by any route retracts its pill on the same frame.
     fn dock_state(&self) -> [u8; DOCK_SLOTS] {
         let focused = self.windows.focused_kind();
         let mut state = [0u8; DOCK_SLOTS];
@@ -222,7 +200,6 @@ impl Scene {
         state
     }
 
-    /// Carries out what the dock decided. True when the press belonged to it.
     fn apply_dock(&mut self, action: DockAction) -> bool {
         match action {
             DockAction::None => false,
@@ -234,9 +211,6 @@ impl Scene {
         }
     }
 
-    /// Takes the keystrokes the shell claims for itself and hands back the
-    /// rest for the focused app. A shortcut the shell acts on never also
-    /// reaches an app, which is what keeps one key from meaning two things.
     fn handle_shortcuts(&mut self, keys: &KeyBatch) -> KeyBatch {
         let mut rest = KeyBatch::EMPTY;
         for event in keys.iter() {
@@ -288,16 +262,12 @@ impl Scene {
             if click {
                 self.spawn_ripple(cursor.0, cursor.1);
             }
-            // The dock sees the press first so its depress shows on the same
-            // frame; what it decides is carried out here.
             let interactive = self.mode == ShellMode::Desktop && !self.windows.is_dragging();
             let state = self.dock_state();
             self.dock.set_presence(self.chrome_t());
             let action = self.dock.update(dt, cursor, click, held, &state, interactive);
             let mut taken = self.apply_dock(action);
             if click && !taken && self.chrome_hit(cursor.0, cursor.1) {
-                // The glass is a surface, not a hole: a press that lands on
-                // the top bar stops there.
                 taken = true;
             }
             let for_apps = self.handle_shortcuts(&input.keys);
@@ -328,10 +298,6 @@ impl Scene {
     }
 
     fn collect_damage(&mut self) {
-        // A cursor that has not moved is already on screen where it belongs.
-        // One that has must claim where it was as well as where it is: anything
-        // that can stay still for a frame has to carry its own history, because
-        // the frame-to-frame union only covers what was repainted last frame.
         let now = (self.cursor_x.current as i32, self.cursor_y.current as i32);
         let tint = self.cursor_tint();
         if now != self.last_cursor || tint != self.last_tint {
@@ -355,14 +321,10 @@ impl Scene {
         }
 
         match self.mode {
-            // Everything is in motion during the unlock, and the whole lock UI
-            // slides at once. Not worth being clever about.
             ShellMode::Unlocking => self.damage.mark_all(),
             ShellMode::Locked => {
                 let (clock, date, hint) = self.lock_rects();
                 self.damage.add(clock);
-                // The hint breathes every frame; the date only moves while the
-                // lock screen is arriving, or when the day rolls over.
                 self.damage.add(hint);
                 if self.lock_entrance.t() < 1.0 || self.date_dirty {
                     self.damage.add(date);
@@ -371,20 +333,16 @@ impl Scene {
             }
             ShellMode::Desktop => {
                 if self.clock_entrance.t() < 1.0 {
-                    // The bar is still settling, so all of it moves.
                     let (bx, by, bw, bh) = self.top_bar_rect();
                     self.damage
                         .add(Rect::from_size(bx, by, bw, bh).union(&shapes::shadow_bounds(bx, by, bw, bh)));
                 } else {
-                    // Afterwards only the digits roll and the colon breathes.
                     self.damage.add(self.top_clock_rect());
                 }
                 self.windows.damage_into(&mut self.damage);
                 self.dock.damage(&mut self.damage);
             }
         }
-        // Windows keep animating behind the lock screen and while it lifts, so
-        // their damage is collected in every mode, not only on the desktop.
         if self.mode != ShellMode::Desktop {
             self.windows.forget_damage();
             self.dock.forget();
@@ -432,7 +390,6 @@ impl Scene {
     }
 
 
-    /// How far the shell chrome has arrived: 0 while locked, 1 on the desktop.
     fn chrome_t(&self) -> f32 {
         match self.mode {
             ShellMode::Locked => 0.0,
@@ -517,8 +474,6 @@ impl Scene {
             let radius = (r.start_r + t * r.grow) as i32;
             let alpha = ((1.0 - t) * (1.0 - t) * 200.0) as u8;
             if alpha < 6 { continue; }
-            // A ripple 400 px across still costs thousands of coverage tests
-            // when it is nowhere near the region being repainted.
             if !Rect::from_size(r.x as i32 - radius - 4, r.y as i32 - radius - 4, radius * 2 + 8, radius * 2 + 8)
                 .intersects(&clip)
             {
