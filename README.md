@@ -85,7 +85,7 @@ and launches QEMU at 1280x720 with the host clock passed through.
 
 The current build boots into a lock screen. Any key or a click unlocks it, and the desktop
 arrives with two windows. Drag them by the title bar, click one to bring it to the front,
-close one with the red dot, Escape or Ctrl-W, walk the stack with Tab, and launch apps
+close one with the red dot, Escape or Ctrl-W, walk the stack with Tab or back down it with Shift-Tab, and launch apps
 from the dock by clicking or with the number keys 1 to 6. Inside the ball window, click
 the ball to throw it, space to make it jump, R to reset it.
 

@@ -242,6 +242,16 @@ impl WindowManager {
         }
     }
 
+    pub fn cycle_focus_back(&mut self) {
+        if self.windows.iter().filter(|w| w.closing.is_none()).count() < 2 {
+            return;
+        }
+        if let Some(idx) = self.windows.iter().rposition(|w| w.closing.is_none()) {
+            let win = self.windows.remove(idx);
+            self.windows.insert(0, win);
+        }
+    }
+
     pub fn update(
         &mut self,
         dt: f32,

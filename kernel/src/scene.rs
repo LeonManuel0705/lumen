@@ -221,6 +221,7 @@ impl Scene {
             match event.key {
                 Key::Escape => self.windows.close_focused(),
                 Key::Char('w') if event.mods.ctrl => self.windows.close_focused(),
+                Key::Tab if event.mods.shift => self.windows.cycle_focus_back(),
                 Key::Tab => self.windows.cycle_focus(),
                 Key::Char(c) if ('1'..='6').contains(&c) => {
                     let slot = c as usize - '1' as usize;
