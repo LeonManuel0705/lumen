@@ -9,6 +9,8 @@ const GRAVITY: f32 = 1800.0;
 const RADIUS: f32 = 24.0;
 const WALL_DAMPING: f32 = 0.88;
 const FLOOR_DAMPING: f32 = 0.84;
+const ARROW_PUSH: f32 = 180.0;
+const MAX_SIDE_SPEED: f32 = 900.0;
 
 pub struct BallApp {
     width: f32,
@@ -106,6 +108,12 @@ impl App for BallApp {
             self.vx += crate::rng::sign() * 80.0;
             self.squash.nudge(-10.0);
             self.pulse.nudge(-2.0);
+        }
+
+        let push = input.keys.pressed(Key::Right) as i32 - input.keys.pressed(Key::Left) as i32;
+        if push != 0 {
+            self.vx = (self.vx + push as f32 * ARROW_PUSH).clamp(-MAX_SIDE_SPEED, MAX_SIDE_SPEED);
+            self.squash.nudge(-4.0);
         }
 
         self.vy += GRAVITY * dt;
