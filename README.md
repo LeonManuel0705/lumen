@@ -72,7 +72,7 @@ latency all become kernel concerns.
   into the window's own surface
 * Ball, the bouncing ball that has been the animation testbed since the beginning, with
   squash and stretch, a trail and a shadow that tightens as it falls
-* Uhr, the rolling clock with seconds
+* Uhr, the rolling clock with seconds, which the S key hides and shows again
 
 ## Run it
 

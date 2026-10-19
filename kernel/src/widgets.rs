@@ -53,6 +53,12 @@ impl RollingClock {
         self.chars = new;
     }
 
+    pub fn toggle_seconds(&mut self) {
+        self.show_seconds = !self.show_seconds;
+        self.prev = self.chars;
+        self.anim = [0.0; 8];
+    }
+
     pub fn update(&mut self, dt: f32) {
         for (a, moved) in self.anim.iter_mut().zip(self.moved_this_frame.iter_mut()) {
             if *a < 1.0 {

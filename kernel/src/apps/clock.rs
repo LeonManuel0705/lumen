@@ -1,4 +1,5 @@
 use crate::gfx::{font_data, Canvas, Rect, Surface};
+use crate::input::Key;
 use crate::widgets::{self, RollingClock};
 
 use super::{App, AppInput};
@@ -42,7 +43,10 @@ impl App for ClockApp {
         self.clock.set(day_seconds);
     }
 
-    fn update(&mut self, dt: f32, _input: &AppInput<'_>) {
+    fn update(&mut self, dt: f32, input: &AppInput<'_>) {
+        if input.keys.pressed(Key::Char('s')) {
+            self.clock.toggle_seconds();
+        }
         self.phase += dt;
         if self.phase >= 1.0 {
             self.phase -= 1.0;
