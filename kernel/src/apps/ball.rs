@@ -11,6 +11,7 @@ const WALL_DAMPING: f32 = 0.88;
 const FLOOR_DAMPING: f32 = 0.84;
 const ARROW_PUSH: f32 = 180.0;
 const MAX_SIDE_SPEED: f32 = 900.0;
+const SLAM_SPEED: f32 = 1100.0;
 
 pub struct BallApp {
     width: f32,
@@ -103,7 +104,12 @@ impl App for BallApp {
             }
         }
 
-        if input.keys.pressed(Key::Space) {
+        if input.keys.pressed(Key::Down) {
+            self.vy = self.vy.max(0.0) + SLAM_SPEED;
+            self.squash.nudge(10.0);
+        }
+
+        if input.keys.pressed(Key::Space) || input.keys.pressed(Key::Up) {
             self.vy = -640.0;
             self.vx += crate::rng::sign() * 80.0;
             self.squash.nudge(-10.0);
