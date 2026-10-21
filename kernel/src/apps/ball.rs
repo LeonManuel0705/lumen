@@ -6,6 +6,7 @@ use super::{App, AppInput};
 
 const TRAIL_LEN: usize = 22;
 const GRAVITY: f32 = 1800.0;
+const MOON_GRAVITY: f32 = 600.0;
 const RADIUS: f32 = 24.0;
 const WALL_DAMPING: f32 = 0.88;
 const FLOOR_DAMPING: f32 = 0.84;
@@ -22,6 +23,8 @@ pub struct BallApp {
     vy: f32,
     squash: Spring,
     pulse: Spring,
+    gravity: Spring,
+    moon: bool,
     trail: [(f32, f32); TRAIL_LEN],
     trail_idx: usize,
 }
@@ -39,6 +42,8 @@ impl BallApp {
             vy: 0.0,
             squash: Spring::new(0.0, 220.0, 14.0),
             pulse: Spring::new(1.0, 120.0, 12.0),
+            gravity: Spring::new(GRAVITY, 60.0, 15.5),
+            moon: false,
             trail: [start; TRAIL_LEN],
             trail_idx: 0,
         }
@@ -122,7 +127,14 @@ impl App for BallApp {
             self.squash.nudge(-4.0);
         }
 
-        self.vy += GRAVITY * dt;
+        if input.keys.pressed(Key::Char('g')) {
+            self.moon = !self.moon;
+            self.gravity.set_target(if self.moon { MOON_GRAVITY } else { GRAVITY });
+            self.pulse.nudge(3.0);
+        }
+        self.gravity.step(dt);
+
+        self.vy += self.gravity.current * dt;
         self.x += self.vx * dt;
         self.y += self.vy * dt;
 
