@@ -88,8 +88,8 @@ arrives with two windows. Drag them by the title bar, click one to bring it to t
 close one with the red dot, Escape or Ctrl-W, walk the stack with Tab or back down it with Shift-Tab, and launch apps
 from the dock by clicking or with the number keys 1 to 6. Inside the ball window, click
 the ball to throw it, space or the up arrow to make it jump, the down arrow to slam it into
-the floor, the left and right arrows to push it sideways, G to swap earth gravity for moon
-gravity and back, R to reset it.
+the floor, the left and right arrows to push it sideways, X to stop it dead so it drops
+straight down, G to swap earth gravity for moon gravity and back, R to reset it.
 
 | Variable | Effect |
 |:---|:---|

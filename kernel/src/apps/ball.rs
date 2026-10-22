@@ -127,6 +127,13 @@ impl App for BallApp {
             self.squash.nudge(-4.0);
         }
 
+        if input.keys.pressed(Key::Char('x')) {
+            self.vx = 0.0;
+            self.vy = 0.0;
+            self.squash.nudge(6.0);
+            self.pulse.nudge(-2.0);
+        }
+
         if input.keys.pressed(Key::Char('g')) {
             self.moon = !self.moon;
             self.gravity.set_target(if self.moon { MOON_GRAVITY } else { GRAVITY });
