@@ -6,7 +6,7 @@ the whole compositor runs on bare metal with no standard library underneath it.
 
 Lumen boots on `x86_64`, talks directly to the hardware, and draws its own interface into
 a linear framebuffer. There is no libc, no allocator from a crate registry doing the heavy
-lifting, and no graphics stack. Roughly 4,200 lines of `no_std` Rust sit between the
+lifting, and no graphics stack. Roughly 6,100 lines of `no_std` Rust sit between the
 bootloader handoff and the pixels.
 
 ## Why build this
