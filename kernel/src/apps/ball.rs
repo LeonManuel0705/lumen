@@ -78,6 +78,8 @@ impl BallApp {
         self.y = RADIUS + 8.0;
         self.vx = 220.0;
         self.vy = 0.0;
+        self.moon = false;
+        self.gravity.set_target(GRAVITY);
         self.trail = [(self.x, self.y); TRAIL_LEN];
     }
 }
