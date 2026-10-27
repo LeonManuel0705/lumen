@@ -25,6 +25,7 @@ pub struct BallApp {
     pulse: Spring,
     gravity: Spring,
     moon: bool,
+    paused: bool,
     trail: [(f32, f32); TRAIL_LEN],
     trail_idx: usize,
 }
@@ -44,6 +45,7 @@ impl BallApp {
             pulse: Spring::new(1.0, 120.0, 12.0),
             gravity: Spring::new(GRAVITY, 60.0, 15.5),
             moon: false,
+            paused: false,
             trail: [start; TRAIL_LEN],
             trail_idx: 0,
         }
@@ -79,6 +81,7 @@ impl BallApp {
         self.vx = 220.0;
         self.vy = 0.0;
         self.moon = false;
+        self.paused = false;
         self.gravity.set_target(GRAVITY);
         self.trail = [(self.x, self.y); TRAIL_LEN];
     }
@@ -96,6 +99,13 @@ impl App for BallApp {
     fn update(&mut self, dt: f32, input: &AppInput<'_>) {
         if input.keys.pressed(Key::Char('r')) {
             self.reset();
+        }
+
+        if input.keys.pressed(Key::Char('p')) {
+            self.paused = !self.paused;
+        }
+        if self.paused {
+            return;
         }
 
         if input.clicked {
