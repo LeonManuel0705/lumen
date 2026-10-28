@@ -89,7 +89,7 @@ close one with the red dot, Escape or Ctrl-W, walk the stack with Tab or back do
 from the dock by clicking or with the number keys 1 to 6. Inside the ball window, click
 the ball to throw it, space or the up arrow to make it jump, the down arrow to slam it into
 the floor, the left and right arrows to push it sideways, X to stop it dead so it drops
-straight down, C to pull it back to the middle of the window, F to send it back the way it came, G to swap earth gravity for moon gravity and back, P to freeze it in mid-air and let it go again, R to reset it and bring it back to earth.
+straight down, C to pull it back to the middle of the window, F to send it back the way it came, G to swap earth gravity for moon gravity and back, P to freeze it in mid-air and let it go again, T to hide its trail and bring it back, R to reset it and bring it back to earth.
 
 | Variable | Effect |
 |:---|:---|

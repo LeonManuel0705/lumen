@@ -26,6 +26,7 @@ pub struct BallApp {
     gravity: Spring,
     moon: bool,
     paused: bool,
+    trail_hidden: bool,
     trail: [(f32, f32); TRAIL_LEN],
     trail_idx: usize,
 }
@@ -46,6 +47,7 @@ impl BallApp {
             gravity: Spring::new(GRAVITY, 60.0, 15.5),
             moon: false,
             paused: false,
+            trail_hidden: false,
             trail: [start; TRAIL_LEN],
             trail_idx: 0,
         }
@@ -53,11 +55,13 @@ impl BallApp {
 
     fn ink(&self) -> Rect {
         let mut r = Rect::new(i32::MAX, i32::MAX, i32::MIN, i32::MIN);
-        for (tx, ty) in self.trail.iter() {
-            r.x0 = r.x0.min(*tx as i32);
-            r.y0 = r.y0.min(*ty as i32);
-            r.x1 = r.x1.max(*tx as i32);
-            r.y1 = r.y1.max(*ty as i32);
+        if !self.trail_hidden {
+            for (tx, ty) in self.trail.iter() {
+                r.x0 = r.x0.min(*tx as i32);
+                r.y0 = r.y0.min(*ty as i32);
+                r.x1 = r.x1.max(*tx as i32);
+                r.y1 = r.y1.max(*ty as i32);
+            }
         }
         r.x0 = r.x0.min(self.x as i32);
         r.y0 = r.y0.min(self.y as i32);
@@ -99,6 +103,10 @@ impl App for BallApp {
     fn update(&mut self, dt: f32, input: &AppInput<'_>) {
         if input.keys.pressed(Key::Char('r')) {
             self.reset();
+        }
+
+        if input.keys.pressed(Key::Char('t')) {
+            self.trail_hidden = !self.trail_hidden;
         }
 
         if input.keys.pressed(Key::Char('p')) {
@@ -211,16 +219,18 @@ impl App for BallApp {
         let floor_y = self.height as i32;
         shapes::fill_rect(surface, 0, floor_y - 2, self.width as i32, 2, Color::rgba(255, 255, 255, 150));
 
-        for i in 0..TRAIL_LEN {
-            let idx = (self.trail_idx + i) % TRAIL_LEN;
-            let age = i as f32 / TRAIL_LEN as f32;
-            let alpha = (age * age * 90.0) as u8;
-            if alpha < 8 {
-                continue;
+        if !self.trail_hidden {
+            for i in 0..TRAIL_LEN {
+                let idx = (self.trail_idx + i) % TRAIL_LEN;
+                let age = i as f32 / TRAIL_LEN as f32;
+                let alpha = (age * age * 90.0) as u8;
+                if alpha < 8 {
+                    continue;
+                }
+                let (tx, ty) = self.trail[idx];
+                let r = (RADIUS * (0.4 + age * 0.5)) as i32;
+                shapes::fill_circle(surface, tx as i32, ty as i32, r, Color::LUMEN_ACCENT.with_alpha(alpha));
             }
-            let (tx, ty) = self.trail[idx];
-            let r = (RADIUS * (0.4 + age * 0.5)) as i32;
-            shapes::fill_circle(surface, tx as i32, ty as i32, r, Color::LUMEN_ACCENT.with_alpha(alpha));
         }
 
         let above = (floor_y as f32 - self.y - RADIUS).max(0.0);
