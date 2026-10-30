@@ -85,11 +85,27 @@ and launches QEMU at 1280x720 with the host clock passed through.
 
 The current build boots into a lock screen. Any key or a click unlocks it, and the desktop
 arrives with two windows. Drag them by the title bar, click one to bring it to the front,
-close one with the red dot, Escape or Ctrl-W, walk the stack with Tab or back down it with Shift-Tab, and launch apps
-from the dock by clicking or with the number keys 1 to 6. Inside the ball window, click
-the ball to throw it, space or the up arrow to make it jump, the down arrow to slam it into
-the floor, the left and right arrows to push it sideways, X to stop it dead so it drops
-straight down, C to pull it back to the middle of the window, F to send it back the way it came, D to drop it from the top of the window, G to swap earth gravity for moon gravity and back, P to freeze it in mid-air and let it go again, T to hide its trail and bring it back, R to reset it and bring it back to earth.
+close one with the red dot, and launch apps from the dock by clicking or with the number
+keys 1 to 6.
+
+| Keys | Effect |
+|:---|:---|
+| Escape, Ctrl-W | Close the focused window |
+| Tab, Shift-Tab | Walk the window stack forwards or backwards |
+| 1 to 6 | Launch or raise a dock app |
+| S in Uhr | Hide or show the seconds |
+| Click in Ball | Throw the ball away from the cursor |
+| Space, Up | Make the ball jump |
+| Down | Slam the ball into the floor |
+| Left, Right | Push the ball sideways |
+| X | Stop the ball dead so it drops straight down |
+| C | Pull the ball back to the middle of the window |
+| F | Send the ball back the way it came |
+| D | Drop the ball from the top of the window |
+| G | Swap earth gravity for moon gravity and back |
+| P | Freeze the ball in mid-air and let it go again |
+| T | Hide the trail and bring it back |
+| R | Reset the ball and bring it back to earth gravity |
 
 | Variable | Effect |
 |:---|:---|
