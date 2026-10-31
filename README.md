@@ -91,6 +91,7 @@ keys 1 to 6.
 | Keys | Effect |
 |:---|:---|
 | Escape, Ctrl-W | Close the focused window |
+| Ctrl-Shift-W | Close every window |
 | Tab, Shift-Tab | Walk the window stack forwards or backwards |
 | 1 to 6 | Launch or raise a dock app |
 | S in Uhr | Hide or show the seconds |

@@ -232,6 +232,13 @@ impl WindowManager {
         }
     }
 
+    pub fn close_all(&mut self) {
+        for win in self.windows.iter_mut().filter(|w| w.closing.is_none()) {
+            win.closing = Some(Tween::new(CLOSE_SECONDS, 0.0));
+            crate::serial_println!("[wm] window {} closing", win.id);
+        }
+    }
+
     pub fn cycle_focus(&mut self) {
         if self.windows.len() < 2 {
             return;

@@ -220,6 +220,7 @@ impl Scene {
             }
             match event.key {
                 Key::Escape => self.windows.close_focused(),
+                Key::Char('w') if event.mods.ctrl && event.mods.shift => self.windows.close_all(),
                 Key::Char('w') if event.mods.ctrl => self.windows.close_focused(),
                 Key::Tab if event.mods.shift => self.windows.cycle_focus_back(),
                 Key::Tab => self.windows.cycle_focus(),
