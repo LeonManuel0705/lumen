@@ -119,10 +119,14 @@ keys 1 to 6.
 |:---|:---|
 | `kernel/` | The kernel itself. `no_std`, target `x86_64-unknown-none`. |
 | `kernel/src/arch/` | GDT, IDT, PIC, PIT, RTC |
-| `kernel/src/gfx/` | Framebuffer, blur, shapes, colour, text, font data |
+| `kernel/src/gfx/` | Framebuffer, surfaces, damage tracking, blur, shapes, dock icons, colour, text, font data |
 | `kernel/src/anim/` | Spring integrator, tween engine, easing curves |
 | `kernel/src/input/` | PS/2, keyboard, mouse |
 | `kernel/src/mem/` | Frame allocator, page mapping, heap allocator |
+| `kernel/src/display.rs` | Frame composition, the glass cache and the compositor self-test |
+| `kernel/src/scene.rs` | The shell: lock screen, unlock, cursor, ripples and keyboard shortcuts |
+| `kernel/src/dock.rs` | The dock: magnification, launch physics and tooltips |
+| `kernel/src/widgets.rs` | The rolling clock and embossed text shared by the lock screen, top bar and Uhr |
 | `kernel/src/wm/` | Window compositor |
 | `kernel/src/apps/` | The app trait and the built-in apps |
 | `runner/` | Host side tool that builds the disk image and starts QEMU |
