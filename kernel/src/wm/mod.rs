@@ -17,6 +17,7 @@ const CLOSE_DOT: i32 = 11;
 const TOP_BAR_FLOOR: f32 = 86.0;
 const CASCADE_STEP: (f32, f32) = (34.0, 30.0);
 const CASCADE_TRIES: usize = 6;
+const KEY_MOVE_STEP: f32 = 40.0;
 
 pub struct Window {
     id: u32,
@@ -103,6 +104,13 @@ impl Window {
     fn painted(&self) -> Rect {
         let (x, y, w, h) = self.frame_rect();
         Rect::from_size(x, y, w, h).union(&shapes::shadow_bounds(x, y, w, h))
+    }
+
+    fn place(&mut self, x: f32, y: f32, screen: (f32, f32)) {
+        let max_x = (screen.0 - self.width as f32 * 0.4).max(0.0);
+        let max_y = (screen.1 - TITLE_BAR as f32 - 8.0).max(TOP_BAR_FLOOR);
+        self.x = x.clamp(-self.width as f32 * 0.6, max_x);
+        self.y = y.clamp(TOP_BAR_FLOOR, max_y);
     }
 }
 
@@ -239,6 +247,20 @@ impl WindowManager {
         }
     }
 
+    pub fn nudge_focused(&mut self, dx: i32, dy: i32) {
+        let screen = self.screen;
+        if let Some(win) = self.windows.iter_mut().rev().find(|w| w.closing.is_none()) {
+            let before = win.painted();
+            win.place(
+                win.x + dx as f32 * KEY_MOVE_STEP,
+                win.y + dy as f32 * KEY_MOVE_STEP,
+                screen,
+            );
+            win.moved = true;
+            win.content_damage = win.content_damage.union(&before).union(&win.painted());
+        }
+    }
+
     pub fn cycle_focus(&mut self) {
         if self.windows.len() < 2 {
             return;
@@ -278,10 +300,7 @@ impl WindowManager {
         if let Some((id, grab_x, grab_y)) = self.dragging {
             let (sw, sh) = self.screen;
             if let Some(win) = self.windows.iter_mut().find(|w| w.id == id) {
-                let max_x = (sw - win.width as f32 * 0.4).max(0.0);
-                let max_y = (sh - TITLE_BAR as f32 - 8.0).max(TOP_BAR_FLOOR);
-                win.x = (cursor.0 - grab_x).clamp(-win.width as f32 * 0.6, max_x);
-                win.y = (cursor.1 - grab_y).clamp(TOP_BAR_FLOOR, max_y);
+                win.place(cursor.0 - grab_x, cursor.1 - grab_y, (sw, sh));
             }
         }
 
