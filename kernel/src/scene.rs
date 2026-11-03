@@ -131,10 +131,13 @@ impl Scene {
     fn lock_rects(&self) -> (Rect, Rect, Rect) {
         let cx = (self.width * 0.5) as i32;
         let baseline = (self.height * 0.382) as i32;
-        let clock = self
-            .big_clock
-            .changed_rect(cx, baseline)
-            .union(&self.big_clock.changed_rect(cx, baseline + LOCK_RISE));
+        let clock = if self.lock_entrance.t() < 1.0 {
+            self.big_clock
+                .full_rect(cx, baseline)
+                .union(&self.big_clock.full_rect(cx, baseline + LOCK_RISE))
+        } else {
+            self.big_clock.changed_rect(cx, baseline)
+        };
 
         let font = &font_data::FONT_UI;
         let date_half = self.date_len as i32 * 12 + 24;

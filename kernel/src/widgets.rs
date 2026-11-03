@@ -80,6 +80,16 @@ impl RollingClock {
     }
 
     pub fn changed_rect(&self, center_x: i32, baseline: i32) -> Rect {
+        self.cells_rect(center_x, baseline, |i, colon| {
+            colon || self.anim[i] < 1.0 || self.moved_this_frame[i]
+        })
+    }
+
+    pub fn full_rect(&self, center_x: i32, baseline: i32) -> Rect {
+        self.cells_rect(center_x, baseline, |_, _| true)
+    }
+
+    fn cells_rect(&self, center_x: i32, baseline: i32, include: impl Fn(usize, bool) -> bool) -> Rect {
         if self.chars[0] == 0 {
             return Rect::EMPTY;
         }
@@ -94,7 +104,7 @@ impl RollingClock {
         for i in 0..self.len() {
             let colon = self.chars[i] as char == ':';
             let advance = if colon { colon_adv } else { cell };
-            if colon || self.anim[i] < 1.0 || self.moved_this_frame[i] {
+            if include(i, colon) {
                 changed = changed.union(&Rect::new(
                     pen - 4,
                     baseline - digit_h - lift - 4,
