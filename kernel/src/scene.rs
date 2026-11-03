@@ -222,6 +222,7 @@ impl Scene {
                 Key::Escape => self.windows.close_focused(),
                 Key::Char('w') if event.mods.ctrl && event.mods.shift => self.windows.close_all(),
                 Key::Char('w') if event.mods.ctrl => self.windows.close_focused(),
+                Key::Char('c') if event.mods.alt => self.windows.center_focused(),
                 Key::Left if event.mods.alt => self.windows.nudge_focused(-1, 0),
                 Key::Right if event.mods.alt => self.windows.nudge_focused(1, 0),
                 Key::Up if event.mods.alt => self.windows.nudge_focused(0, -1),

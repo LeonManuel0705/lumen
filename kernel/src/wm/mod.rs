@@ -247,18 +247,31 @@ impl WindowManager {
         }
     }
 
-    pub fn nudge_focused(&mut self, dx: i32, dy: i32) {
+    fn relocate_focused(&mut self, target: impl Fn(&Window) -> (f32, f32)) {
         let screen = self.screen;
         if let Some(win) = self.windows.iter_mut().rev().find(|w| w.closing.is_none()) {
             let before = win.painted();
-            win.place(
-                win.x + dx as f32 * KEY_MOVE_STEP,
-                win.y + dy as f32 * KEY_MOVE_STEP,
-                screen,
-            );
+            let (x, y) = target(win);
+            win.place(x, y, screen);
             win.moved = true;
             win.content_damage = win.content_damage.union(&before).union(&win.painted());
         }
+    }
+
+    pub fn nudge_focused(&mut self, dx: i32, dy: i32) {
+        self.relocate_focused(|win| {
+            (
+                win.x + dx as f32 * KEY_MOVE_STEP,
+                win.y + dy as f32 * KEY_MOVE_STEP,
+            )
+        });
+    }
+
+    pub fn center_focused(&mut self) {
+        let (sw, sh) = self.screen;
+        self.relocate_focused(|win| {
+            ((sw - win.width as f32) * 0.5, (sh - win.height as f32) * 0.5)
+        });
     }
 
     pub fn cycle_focus(&mut self) {

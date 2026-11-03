@@ -93,6 +93,7 @@ keys 1 to 6.
 | Escape, Ctrl-W | Close the focused window |
 | Ctrl-Shift-W | Close every window |
 | Alt with an arrow | Move the focused window by 40 pixels |
+| Alt-C | Center the focused window |
 | Tab, Shift-Tab | Walk the window stack forwards or backwards |
 | 1 to 6 | Launch or raise a dock app |
 | S in Uhr | Hide or show the seconds |
