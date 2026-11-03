@@ -85,17 +85,19 @@ and launches QEMU at 1280x720 with the host clock passed through.
 
 The current build boots into a lock screen. Any key or a click unlocks it, and the desktop
 arrives with two windows. Drag them by the title bar, click one to bring it to the front,
-close one with the red dot, and launch apps from the dock by clicking or with the number
-keys 1 to 6.
+close one with the red dot or tuck it away with the amber one, and launch apps from the
+dock by clicking or with the number keys 1 to 6. A tucked away window comes back from its
+dock icon.
 
 | Keys | Effect |
 |:---|:---|
 | Escape, Ctrl-W | Close the focused window |
 | Ctrl-Shift-W | Close every window |
+| Ctrl-M | Minimise the focused window |
 | Alt with an arrow | Move the focused window by 40 pixels |
 | Alt-C | Center the focused window |
 | Tab, Shift-Tab | Walk the window stack forwards or backwards |
-| 1 to 6 | Launch or raise a dock app |
+| 1 to 6 | Launch, raise or bring back a dock app |
 | S in Uhr | Hide or show the seconds |
 | Click in Ball | Throw the ball away from the cursor |
 | Space, Up | Make the ball jump |
@@ -165,9 +167,10 @@ the right moment, so the kernel checks its own work: every two seconds it redraw
 whole scene into scratch space and compares, and reports the first disagreeing pixel over
 the serial port. Set `VERIFY_EVERY` to 0 in `main.rs` to turn it off.
 
-There is still no window resizing and no minimise, and window glass reads its frosted
+Windows minimise, but for now they fade out like a closing window instead of pouring
+into the dock. There is still no window resizing, and window glass reads its frosted
 backdrop from the wallpaper rather than from whatever is actually behind the window,
-which is invisible until windows overlap and is the next thing in the way.
+which is invisible until windows overlap.
 
 ## License
 

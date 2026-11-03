@@ -13,7 +13,9 @@ const CORNER: i32 = 20;
 const CONTENT_INSET: i32 = 8;
 const OPEN_SECONDS: f32 = 0.42;
 const CLOSE_SECONDS: f32 = 0.24;
+const MINIMIZE_SECONDS: f32 = 0.24;
 const CLOSE_DOT: i32 = 11;
+const DOT_GAP: i32 = 30;
 const TOP_BAR_FLOOR: f32 = 86.0;
 const CASCADE_STEP: (f32, f32) = (34.0, 30.0);
 const CASCADE_TRIES: usize = 6;
@@ -30,6 +32,8 @@ pub struct Window {
     height: i32,
     open: Tween,
     closing: Option<Tween>,
+    minimizing: Option<Tween>,
+    minimized: bool,
     lift: Spring,
     moved: bool,
     content_damage: Rect,
@@ -44,18 +48,36 @@ impl Window {
         let t = self.open.t();
         let scale = 0.86 + 0.14 * easing::ease_out_back(t);
         let opacity = easing::ease_out_quad(t);
-        let Some(close) = &self.closing else {
+        let Some(leave) = self.closing.as_ref().or(self.minimizing.as_ref()) else {
             return (scale, (opacity * 255.0) as u8);
         };
-        let c = close.t();
+        let c = leave.t();
         (
             scale * (1.0 - 0.12 * easing::ease_in_quad(c)),
             (opacity * (1.0 - c) * 255.0) as u8,
         )
     }
 
+    fn is_present(&self) -> bool {
+        self.closing.is_none() && self.minimizing.is_none() && !self.minimized
+    }
+
     fn is_interactive(&self) -> bool {
-        self.closing.is_none() && self.presentation().1 >= 8
+        self.is_present() && self.presentation().1 >= 8
+    }
+
+    fn begin_minimize(&mut self) {
+        self.minimizing = Some(Tween::new(MINIMIZE_SECONDS, 0.0));
+        crate::serial_println!("[wm] window {} minimizing", self.id);
+    }
+
+    fn restore(&mut self) {
+        self.minimizing = None;
+        self.minimized = false;
+        self.open = Tween::new(OPEN_SECONDS, 0.0);
+        self.first_frame = true;
+        self.moved = true;
+        crate::serial_println!("[wm] window {} restored", self.id);
     }
 
     fn frame_rect(&self) -> (i32, i32, i32, i32) {
@@ -87,11 +109,23 @@ impl Window {
         (x + 20, y + TITLE_BAR / 2)
     }
 
-    fn on_close(&self, px: f32, py: f32) -> bool {
+    fn minimize_dot(&self) -> (i32, i32) {
         let (cx, cy) = self.close_dot();
+        (cx + DOT_GAP, cy)
+    }
+
+    fn near_dot(px: f32, py: f32, (cx, cy): (i32, i32)) -> bool {
         let dx = px - cx as f32;
         let dy = py - cy as f32;
         dx * dx + dy * dy < ((CLOSE_DOT + 5) * (CLOSE_DOT + 5)) as f32
+    }
+
+    fn on_close(&self, px: f32, py: f32) -> bool {
+        Self::near_dot(px, py, self.close_dot())
+    }
+
+    fn on_minimize(&self, px: f32, py: f32) -> bool {
+        Self::near_dot(px, py, self.minimize_dot())
     }
 
     fn content_origin(&self) -> (f32, f32) {
@@ -142,7 +176,7 @@ impl WindowManager {
     }
 
     pub fn focused_kind(&self) -> Option<AppKind> {
-        self.windows.iter().rev().find(|w| w.closing.is_none()).map(|w| w.kind)
+        self.windows.iter().rev().find(|w| w.is_present()).map(|w| w.kind)
     }
 
     pub fn is_dragging(&self) -> bool {
@@ -151,7 +185,10 @@ impl WindowManager {
 
     pub fn open(&mut self, kind: AppKind, x: f32, y: f32, delay: f32) {
         if let Some(idx) = self.index_of_kind(kind) {
-            let win = self.windows.remove(idx);
+            let mut win = self.windows.remove(idx);
+            if !win.is_present() {
+                win.restore();
+            }
             self.windows.push(win);
             return;
         }
@@ -186,6 +223,8 @@ impl WindowManager {
             height,
             open: Tween::new(OPEN_SECONDS, delay),
             closing: None,
+            minimizing: None,
+            minimized: false,
             lift: Spring::new(0.0, 190.0, 22.0),
             moved: true,
             content_damage: Rect::EMPTY,
@@ -207,7 +246,7 @@ impl WindowManager {
         self.windows
             .iter()
             .rev()
-            .find(|w| w.closing.is_none())
+            .find(|w| w.is_present())
             .map(|w| w.id)
     }
 
@@ -227,6 +266,8 @@ impl WindowManager {
         if win.on_close(px, py) {
             win.closing = Some(Tween::new(CLOSE_SECONDS, 0.0));
             crate::serial_println!("[wm] window {} closing", win.id);
+        } else if win.on_minimize(px, py) {
+            win.begin_minimize();
         } else if win.on_title_bar(px, py) {
             self.dragging = Some((win.id, px - win.x, py - win.y));
         }
@@ -234,22 +275,32 @@ impl WindowManager {
     }
 
     pub fn close_focused(&mut self) {
-        if let Some(win) = self.windows.iter_mut().rev().find(|w| w.closing.is_none()) {
+        if let Some(win) = self.windows.iter_mut().rev().find(|w| w.is_present()) {
             win.closing = Some(Tween::new(CLOSE_SECONDS, 0.0));
             crate::serial_println!("[wm] window {} closing", win.id);
         }
     }
 
     pub fn close_all(&mut self) {
+        self.windows.retain(|w| !w.minimized);
         for win in self.windows.iter_mut().filter(|w| w.closing.is_none()) {
-            win.closing = Some(Tween::new(CLOSE_SECONDS, 0.0));
+            win.closing = win.minimizing.take().or(Some(Tween::new(CLOSE_SECONDS, 0.0)));
             crate::serial_println!("[wm] window {} closing", win.id);
+        }
+    }
+
+    pub fn minimize_focused(&mut self) {
+        if let Some(win) = self.windows.iter_mut().rev().find(|w| w.is_present()) {
+            if self.dragging.is_some_and(|(id, _, _)| id == win.id) {
+                self.dragging = None;
+            }
+            win.begin_minimize();
         }
     }
 
     fn relocate_focused(&mut self, target: impl Fn(&Window) -> (f32, f32)) {
         let screen = self.screen;
-        if let Some(win) = self.windows.iter_mut().rev().find(|w| w.closing.is_none()) {
+        if let Some(win) = self.windows.iter_mut().rev().find(|w| w.is_present()) {
             let before = win.painted();
             let (x, y) = target(win);
             win.place(x, y, screen);
@@ -275,20 +326,20 @@ impl WindowManager {
     }
 
     pub fn cycle_focus(&mut self) {
-        if self.windows.len() < 2 {
+        if self.windows.iter().filter(|w| w.is_present()).count() < 2 {
             return;
         }
-        if let Some(idx) = self.windows.iter().position(|w| w.closing.is_none()) {
+        if let Some(idx) = self.windows.iter().position(|w| w.is_present()) {
             let win = self.windows.remove(idx);
             self.windows.push(win);
         }
     }
 
     pub fn cycle_focus_back(&mut self) {
-        if self.windows.iter().filter(|w| w.closing.is_none()).count() < 2 {
+        if self.windows.iter().filter(|w| w.is_present()).count() < 2 {
             return;
         }
-        if let Some(idx) = self.windows.iter().rposition(|w| w.closing.is_none()) {
+        if let Some(idx) = self.windows.iter().rposition(|w| w.is_present()) {
             let win = self.windows.remove(idx);
             self.windows.insert(0, win);
         }
@@ -335,9 +386,18 @@ impl WindowManager {
                 win.content_damage = win.content_damage.union(&before).union(&win.painted());
                 continue;
             }
+            if win.minimized {
+                let idle = AppInput { cursor: (0.0, 0.0), clicked: false, keys: &KeyBatch::EMPTY };
+                win.app.update(dt, &idle);
+                continue;
+            }
+            if let Some(minimize) = win.minimizing.as_mut() {
+                minimize.step(dt);
+            }
 
             win.moved = win.moved
                 || win.first_frame
+                || win.minimizing.is_some()
                 || focused != win.was_focused
                 || open_before < 1.0
                 || Some(win.id) == dragging_id
@@ -360,6 +420,11 @@ impl WindowManager {
             if win.moved {
                 win.content_damage = win.content_damage.union(&before).union(&win.painted());
             }
+            if win.minimizing.as_ref().is_some_and(|m| m.is_done()) {
+                win.minimizing = None;
+                win.minimized = true;
+                crate::serial_println!("[wm] window {} minimized", win.id);
+            }
         }
 
         self.windows
@@ -369,7 +434,7 @@ impl WindowManager {
 
     pub fn render_surfaces(&mut self) {
         for win in self.windows.iter_mut() {
-            if win.closing.is_some() {
+            if win.closing.is_some() || win.minimized {
                 continue;
             }
             let full = Rect::from_size(
@@ -419,7 +484,7 @@ impl WindowManager {
         let clip = frame.clip();
         let focused_id = self.focused_id();
         for win in &self.windows {
-            if !win.painted().intersects(&clip) {
+            if win.minimized || !win.painted().intersects(&clip) {
                 continue;
             }
             self.draw_window(frame, win, Some(win.id) == focused_id);
@@ -454,22 +519,21 @@ impl WindowManager {
             Color::rgba(255, 255, 255, fade(90)),
         );
 
-        let dot_x = x + (20.0 * scale) as i32;
         let dot_y = y + bar_h / 2;
         let dot_r = (CLOSE_DOT as f32 * scale) as i32;
-        let dot_color = if focused {
-            Color::rgb(255, 120, 130)
-        } else {
-            Color::rgba(255, 255, 255, 150)
-        };
-        shapes::fill_circle(frame, dot_x, dot_y, dot_r, dot_color.with_alpha(fade(dot_color.a as u32)));
-        shapes::fill_circle(
-            frame,
-            dot_x - dot_r / 4,
-            dot_y - dot_r / 4,
-            (dot_r / 3).max(1),
-            Color::rgba(255, 255, 255, fade(150)),
-        );
+        let dots = [(20, Color::rgb(255, 120, 130)), (20 + DOT_GAP, Color::rgb(255, 190, 90))];
+        for (offset, accent) in dots {
+            let dot_x = x + (offset as f32 * scale) as i32;
+            let dot_color = if focused { accent } else { Color::rgba(255, 255, 255, 150) };
+            shapes::fill_circle(frame, dot_x, dot_y, dot_r, dot_color.with_alpha(fade(dot_color.a as u32)));
+            shapes::fill_circle(
+                frame,
+                dot_x - dot_r / 4,
+                dot_y - dot_r / 4,
+                (dot_r / 3).max(1),
+                Color::rgba(255, 255, 255, fade(150)),
+            );
+        }
 
         let title = win.app.title();
         let title_x = x + w / 2 - text::measure(&font_data::FONT_UI, title) / 2;
