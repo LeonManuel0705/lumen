@@ -298,6 +298,13 @@ impl WindowManager {
         }
     }
 
+    pub fn minimize_all(&mut self) {
+        self.dragging = None;
+        for win in self.windows.iter_mut().filter(|w| w.is_present()) {
+            win.begin_minimize();
+        }
+    }
+
     fn relocate_focused(&mut self, target: impl Fn(&Window) -> (f32, f32)) {
         let screen = self.screen;
         if let Some(win) = self.windows.iter_mut().rev().find(|w| w.is_present()) {
