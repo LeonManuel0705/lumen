@@ -20,6 +20,7 @@ const TOP_BAR_FLOOR: f32 = 86.0;
 const CASCADE_STEP: (f32, f32) = (34.0, 30.0);
 const CASCADE_TRIES: usize = 6;
 const KEY_MOVE_STEP: f32 = 40.0;
+const KEY_MOVE_FINE_STEP: f32 = 8.0;
 
 pub struct Window {
     id: u32,
@@ -316,13 +317,9 @@ impl WindowManager {
         }
     }
 
-    pub fn nudge_focused(&mut self, dx: i32, dy: i32) {
-        self.relocate_focused(|win| {
-            (
-                win.x + dx as f32 * KEY_MOVE_STEP,
-                win.y + dy as f32 * KEY_MOVE_STEP,
-            )
-        });
+    pub fn nudge_focused(&mut self, dx: i32, dy: i32, fine: bool) {
+        let step = if fine { KEY_MOVE_FINE_STEP } else { KEY_MOVE_STEP };
+        self.relocate_focused(|win| (win.x + dx as f32 * step, win.y + dy as f32 * step));
     }
 
     pub fn center_focused(&mut self) {

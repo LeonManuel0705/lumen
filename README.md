@@ -96,6 +96,7 @@ dock icon.
 | Ctrl-M | Minimise the focused window |
 | Ctrl-Shift-M | Minimise every window |
 | Alt with an arrow | Move the focused window by 40 pixels |
+| Alt-Shift with an arrow | Move the focused window by 8 pixels |
 | Alt-C | Center the focused window |
 | Tab, Shift-Tab | Walk the window stack forwards or backwards |
 | 1 to 6 | Launch, raise or bring back a dock app |
