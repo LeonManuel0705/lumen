@@ -102,6 +102,7 @@ dock icon.
 | Tab, Shift-Tab | Walk the window stack forwards or backwards |
 | 1 to 6 | Launch, raise or bring back a dock app |
 | S in Uhr | Hide or show the seconds |
+| H in Uhr | Switch between the 24 and 12 hour clock |
 | Click in Ball | Throw the ball away from the cursor |
 | Space, Up | Make the ball jump |
 | Down | Slam the ball into the floor |

@@ -47,6 +47,9 @@ impl App for ClockApp {
         if input.keys.pressed(Key::Char('s')) {
             self.clock.toggle_seconds();
         }
+        if input.keys.pressed(Key::Char('h')) {
+            self.clock.toggle_twelve_hour();
+        }
         self.phase += dt;
         if self.phase >= 1.0 {
             self.phase -= 1.0;
@@ -59,6 +62,7 @@ impl App for ClockApp {
         let baseline = surface.height() as i32 / 2 + self.clock.digit_height() / 2 - 8;
         let pulse = 4.0 * self.phase * (1.0 - self.phase);
         self.clock.draw(surface, cx, baseline, 1.0, pulse);
-        widgets::text_embossed(surface, &font_data::FONT_UI, "Ortszeit", cx, baseline + 34, 150);
+        let caption = if self.clock.is_twelve_hour() { "Ortszeit, 12 Stunden" } else { "Ortszeit" };
+        widgets::text_embossed(surface, &font_data::FONT_UI, caption, cx, baseline + 34, 150);
     }
 }

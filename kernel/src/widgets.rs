@@ -7,6 +7,8 @@ const ROLL_SECONDS: f32 = 0.28;
 pub struct RollingClock {
     font: &'static Font,
     show_seconds: bool,
+    twelve_hour: bool,
+    day_seconds: u32,
     chars: [u8; 8],
     prev: [u8; 8],
     anim: [f32; 8],
@@ -18,6 +20,8 @@ impl RollingClock {
         Self {
             font,
             show_seconds,
+            twelve_hour: false,
+            day_seconds: 0,
             chars: [0; 8],
             prev: [0; 8],
             anim: [1.0; 8],
@@ -31,7 +35,11 @@ impl RollingClock {
 
     pub fn set(&mut self, day_seconds: u32) {
         self.moved_this_frame = [false; 8];
-        let h = (day_seconds / 3600) % 24;
+        self.day_seconds = day_seconds;
+        let h = match (day_seconds / 3600) % 24 {
+            hour if !self.twelve_hour => hour,
+            hour => (hour + 11) % 12 + 1,
+        };
         let m = (day_seconds / 60) % 60;
         let s = day_seconds % 60;
         let new = [
@@ -57,6 +65,15 @@ impl RollingClock {
         self.show_seconds = !self.show_seconds;
         self.prev = self.chars;
         self.anim = [0.0; 8];
+    }
+
+    pub fn toggle_twelve_hour(&mut self) {
+        self.twelve_hour = !self.twelve_hour;
+        self.set(self.day_seconds);
+    }
+
+    pub fn is_twelve_hour(&self) -> bool {
+        self.twelve_hour
     }
 
     pub fn update(&mut self, dt: f32) {
