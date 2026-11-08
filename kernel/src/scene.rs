@@ -228,6 +228,7 @@ impl Scene {
                 Key::Char('m') if event.mods.ctrl && event.mods.shift => self.windows.minimize_all(),
                 Key::Char('m') if event.mods.ctrl => self.windows.minimize_focused(),
                 Key::Char('c') if event.mods.alt => self.windows.center_focused(),
+                Key::Char('h') if event.mods.alt => self.windows.home_focused(),
                 Key::Left if event.mods.alt && event.mods.ctrl => self.windows.snap_focused(-1, 0),
                 Key::Right if event.mods.alt && event.mods.ctrl => self.windows.snap_focused(1, 0),
                 Key::Up if event.mods.alt && event.mods.ctrl => self.windows.snap_focused(0, -1),

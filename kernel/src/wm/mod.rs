@@ -30,6 +30,7 @@ pub struct Window {
     surface: Surface,
     x: f32,
     y: f32,
+    home: (f32, f32),
     width: i32,
     height: i32,
     open: Tween,
@@ -214,13 +215,17 @@ impl WindowManager {
             y += CASCADE_STEP.1;
         }
 
+        let x = x.clamp(8.0, (self.screen.0 - width as f32 - 8.0).max(8.0));
+        let y = y.clamp(TOP_BAR_FLOOR, (self.screen.1 - height as f32 - 8.0).max(TOP_BAR_FLOOR));
+
         self.windows.push(Window {
             id,
             kind,
             app: kind.spawn(cw, ch),
             surface: Surface::new(cw, ch),
-            x: x.clamp(8.0, (self.screen.0 - width as f32 - 8.0).max(8.0)),
-            y: y.clamp(TOP_BAR_FLOOR, (self.screen.1 - height as f32 - 8.0).max(TOP_BAR_FLOOR)),
+            x,
+            y,
+            home: (x, y),
             width,
             height,
             open: Tween::new(OPEN_SECONDS, delay),
@@ -338,6 +343,10 @@ impl WindowManager {
             };
             (x, y)
         });
+    }
+
+    pub fn home_focused(&mut self) {
+        self.relocate_focused(|win| win.home);
     }
 
     pub fn center_focused(&mut self) {
