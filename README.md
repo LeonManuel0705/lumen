@@ -100,6 +100,7 @@ dock icon.
 | Ctrl-Alt with an arrow | Send the focused window to that screen edge |
 | Alt-C | Center the focused window |
 | Alt-H | Send the focused window back to where it opened |
+| Alt-Shift-H | Send every window back to where it opened |
 | Tab, Shift-Tab | Walk the window stack forwards or backwards |
 | 1 to 6 | Launch, raise or bring back a dock app |
 | S in Uhr | Hide or show the seconds |

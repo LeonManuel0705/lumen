@@ -143,6 +143,13 @@ impl Window {
         Rect::from_size(x, y, w, h).union(&shapes::shadow_bounds(x, y, w, h))
     }
 
+    fn relocate(&mut self, (x, y): (f32, f32), screen: (f32, f32)) {
+        let before = self.painted();
+        self.place(x, y, screen);
+        self.moved = true;
+        self.content_damage = self.content_damage.union(&before).union(&self.painted());
+    }
+
     fn place(&mut self, x: f32, y: f32, screen: (f32, f32)) {
         let max_x = (screen.0 - self.width as f32 * 0.4).max(0.0);
         let max_y = (screen.1 - TITLE_BAR as f32 - 8.0).max(TOP_BAR_FLOOR);
@@ -315,11 +322,14 @@ impl WindowManager {
     fn relocate_focused(&mut self, target: impl Fn(&Window) -> (f32, f32)) {
         let screen = self.screen;
         if let Some(win) = self.windows.iter_mut().rev().find(|w| w.is_present()) {
-            let before = win.painted();
-            let (x, y) = target(win);
-            win.place(x, y, screen);
-            win.moved = true;
-            win.content_damage = win.content_damage.union(&before).union(&win.painted());
+            win.relocate(target(win), screen);
+        }
+    }
+
+    pub fn home_all(&mut self) {
+        let screen = self.screen;
+        for win in self.windows.iter_mut().filter(|w| w.is_present()) {
+            win.relocate(win.home, screen);
         }
     }
 
