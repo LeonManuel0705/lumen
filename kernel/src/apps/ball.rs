@@ -25,6 +25,7 @@ pub struct BallApp {
     pulse: Spring,
     gravity: Spring,
     moon: bool,
+    weightless: bool,
     paused: bool,
     trail_hidden: bool,
     trail: [(f32, f32); TRAIL_LEN],
@@ -46,6 +47,7 @@ impl BallApp {
             pulse: Spring::new(1.0, 120.0, 12.0),
             gravity: Spring::new(GRAVITY, 60.0, 15.5),
             moon: false,
+            weightless: false,
             paused: false,
             trail_hidden: false,
             trail: [start; TRAIL_LEN],
@@ -85,9 +87,19 @@ impl BallApp {
         self.vx = 220.0;
         self.vy = 0.0;
         self.moon = false;
+        self.weightless = false;
         self.paused = false;
         self.gravity.set_target(GRAVITY);
         self.trail = [(self.x, self.y); TRAIL_LEN];
+    }
+
+    fn retarget_gravity(&mut self) {
+        let target = match (self.weightless, self.moon) {
+            (true, _) => 0.0,
+            (false, true) => MOON_GRAVITY,
+            (false, false) => GRAVITY,
+        };
+        self.gravity.set_target(target);
     }
 }
 
@@ -176,7 +188,13 @@ impl App for BallApp {
 
         if input.keys.pressed(Key::Char('g')) {
             self.moon = !self.moon;
-            self.gravity.set_target(if self.moon { MOON_GRAVITY } else { GRAVITY });
+            self.retarget_gravity();
+            self.pulse.nudge(3.0);
+        }
+
+        if input.keys.pressed(Key::Char('z')) {
+            self.weightless = !self.weightless;
+            self.retarget_gravity();
             self.pulse.nudge(3.0);
         }
         self.gravity.step(dt);

@@ -114,6 +114,7 @@ dock icon.
 | F | Send the ball back the way it came |
 | D | Drop the ball from the top of the window |
 | G | Swap earth gravity for moon gravity and back |
+| Z | Ease gravity away so the ball floats, and back |
 | P | Freeze the ball in mid-air and let it go again |
 | T | Hide the trail and bring it back |
 | R | Reset the ball and bring it back to earth gravity |
