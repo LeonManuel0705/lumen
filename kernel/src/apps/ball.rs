@@ -13,6 +13,7 @@ const FLOOR_DAMPING: f32 = 0.84;
 const ARROW_PUSH: f32 = 180.0;
 const MAX_SIDE_SPEED: f32 = 900.0;
 const SLAM_SPEED: f32 = 1100.0;
+const SLOW_TEMPO: f32 = 0.3;
 
 pub struct BallApp {
     width: f32,
@@ -24,6 +25,8 @@ pub struct BallApp {
     squash: Spring,
     pulse: Spring,
     gravity: Spring,
+    tempo: Spring,
+    slow: bool,
     moon: bool,
     weightless: bool,
     paused: bool,
@@ -46,6 +49,8 @@ impl BallApp {
             squash: Spring::new(0.0, 220.0, 14.0),
             pulse: Spring::new(1.0, 120.0, 12.0),
             gravity: Spring::new(GRAVITY, 60.0, 15.5),
+            tempo: Spring::new(1.0, 80.0, 18.0),
+            slow: false,
             moon: false,
             weightless: false,
             paused: false,
@@ -88,6 +93,8 @@ impl BallApp {
         self.vy = 0.0;
         self.moon = false;
         self.weightless = false;
+        self.slow = false;
+        self.tempo.set_target(1.0);
         self.paused = false;
         self.gravity.set_target(GRAVITY);
         self.trail = [(self.x, self.y); TRAIL_LEN];
@@ -127,6 +134,14 @@ impl App for BallApp {
         if self.paused {
             return;
         }
+
+        if input.keys.pressed(Key::Char('s')) {
+            self.slow = !self.slow;
+            self.tempo.set_target(if self.slow { SLOW_TEMPO } else { 1.0 });
+            self.pulse.nudge(3.0);
+        }
+        self.tempo.step(dt);
+        let dt = dt * self.tempo.current.max(0.05);
 
         if input.clicked {
             let dx = input.cursor.0 - self.x;
