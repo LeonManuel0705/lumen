@@ -116,6 +116,7 @@ dock icon.
 | G | Swap earth gravity for moon gravity and back |
 | Z | Ease gravity away so the ball floats, and back |
 | S in Ball | Ease the ball into slow motion and back |
+| B | Turn the ball into a superball that barely loses energy, and back |
 | P | Freeze the ball in mid-air and let it go again |
 | T | Hide the trail and bring it back |
 | R | Reset the ball and bring it back to earth gravity |

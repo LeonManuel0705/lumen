@@ -10,6 +10,7 @@ const MOON_GRAVITY: f32 = 600.0;
 const RADIUS: f32 = 24.0;
 const WALL_DAMPING: f32 = 0.88;
 const FLOOR_DAMPING: f32 = 0.84;
+const SUPERBALL_DAMPING: f32 = 0.985;
 const ARROW_PUSH: f32 = 180.0;
 const MAX_SIDE_SPEED: f32 = 900.0;
 const SLAM_SPEED: f32 = 1100.0;
@@ -27,6 +28,7 @@ pub struct BallApp {
     gravity: Spring,
     tempo: Spring,
     slow: bool,
+    superball: bool,
     moon: bool,
     weightless: bool,
     paused: bool,
@@ -51,6 +53,7 @@ impl BallApp {
             gravity: Spring::new(GRAVITY, 60.0, 15.5),
             tempo: Spring::new(1.0, 80.0, 18.0),
             slow: false,
+            superball: false,
             moon: false,
             weightless: false,
             paused: false,
@@ -94,10 +97,15 @@ impl BallApp {
         self.moon = false;
         self.weightless = false;
         self.slow = false;
+        self.superball = false;
         self.tempo.set_target(1.0);
         self.paused = false;
         self.gravity.set_target(GRAVITY);
         self.trail = [(self.x, self.y); TRAIL_LEN];
+    }
+
+    fn damping(&self, base: f32) -> f32 {
+        if self.superball { SUPERBALL_DAMPING } else { base }
     }
 
     fn retarget_gravity(&mut self) {
@@ -207,6 +215,12 @@ impl App for BallApp {
             self.pulse.nudge(3.0);
         }
 
+        if input.keys.pressed(Key::Char('b')) {
+            self.superball = !self.superball;
+            self.squash.nudge(-8.0);
+            self.pulse.nudge(3.0);
+        }
+
         if input.keys.pressed(Key::Char('z')) {
             self.weightless = !self.weightless;
             self.retarget_gravity();
@@ -220,13 +234,13 @@ impl App for BallApp {
 
         if self.x - RADIUS < 0.0 {
             self.x = RADIUS;
-            self.vx = self.vx.abs() * WALL_DAMPING;
+            self.vx = self.vx.abs() * self.damping(WALL_DAMPING);
             self.squash.nudge(8.0);
             self.pulse.nudge(-2.0);
         }
         if self.x + RADIUS > self.width {
             self.x = self.width - RADIUS;
-            self.vx = -self.vx.abs() * WALL_DAMPING;
+            self.vx = -self.vx.abs() * self.damping(WALL_DAMPING);
             self.squash.nudge(8.0);
             self.pulse.nudge(-2.0);
         }
@@ -236,7 +250,7 @@ impl App for BallApp {
                 self.vy = -460.0;
                 self.vx += crate::rng::sign() * 80.0;
             } else {
-                self.vy = -self.vy.abs() * FLOOR_DAMPING;
+                self.vy = -self.vy.abs() * self.damping(FLOOR_DAMPING);
             }
             self.squash.nudge(-12.0);
             self.pulse.nudge(-4.0);
