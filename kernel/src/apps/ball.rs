@@ -29,6 +29,7 @@ pub struct BallApp {
     tempo: Spring,
     slow: bool,
     superball: bool,
+    wrap: bool,
     moon: bool,
     weightless: bool,
     paused: bool,
@@ -54,6 +55,7 @@ impl BallApp {
             tempo: Spring::new(1.0, 80.0, 18.0),
             slow: false,
             superball: false,
+            wrap: false,
             moon: false,
             weightless: false,
             paused: false,
@@ -98,6 +100,7 @@ impl BallApp {
         self.weightless = false;
         self.slow = false;
         self.superball = false;
+        self.wrap = false;
         self.tempo.set_target(1.0);
         self.paused = false;
         self.gravity.set_target(GRAVITY);
@@ -221,6 +224,11 @@ impl App for BallApp {
             self.pulse.nudge(3.0);
         }
 
+        if input.keys.pressed(Key::Char('w')) {
+            self.wrap = !self.wrap;
+            self.pulse.nudge(3.0);
+        }
+
         if input.keys.pressed(Key::Char('z')) {
             self.weightless = !self.weightless;
             self.retarget_gravity();
@@ -232,17 +240,28 @@ impl App for BallApp {
         self.x += self.vx * dt;
         self.y += self.vy * dt;
 
-        if self.x - RADIUS < 0.0 {
-            self.x = RADIUS;
-            self.vx = self.vx.abs() * self.damping(WALL_DAMPING);
-            self.squash.nudge(8.0);
-            self.pulse.nudge(-2.0);
-        }
-        if self.x + RADIUS > self.width {
-            self.x = self.width - RADIUS;
-            self.vx = -self.vx.abs() * self.damping(WALL_DAMPING);
-            self.squash.nudge(8.0);
-            self.pulse.nudge(-2.0);
+        if self.wrap {
+            let span = self.width + RADIUS * 2.0;
+            if self.x < -RADIUS {
+                self.x += span;
+                self.pulse.nudge(-2.0);
+            } else if self.x > self.width + RADIUS {
+                self.x -= span;
+                self.pulse.nudge(-2.0);
+            }
+        } else {
+            if self.x - RADIUS < 0.0 {
+                self.x = RADIUS;
+                self.vx = self.vx.abs() * self.damping(WALL_DAMPING);
+                self.squash.nudge(8.0);
+                self.pulse.nudge(-2.0);
+            }
+            if self.x + RADIUS > self.width {
+                self.x = self.width - RADIUS;
+                self.vx = -self.vx.abs() * self.damping(WALL_DAMPING);
+                self.squash.nudge(8.0);
+                self.pulse.nudge(-2.0);
+            }
         }
         if self.y + RADIUS > self.height {
             self.y = self.height - RADIUS;
