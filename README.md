@@ -95,6 +95,7 @@ dock icon.
 | Ctrl-Shift-W | Close every window |
 | Ctrl-M | Minimise the focused window |
 | Ctrl-Shift-M | Minimise every window |
+| Ctrl-Alt-M | Bring back every minimised window |
 | Alt with an arrow | Move the focused window by 40 pixels |
 | Alt-Shift with an arrow | Move the focused window by 8 pixels |
 | Ctrl-Alt with an arrow | Send the focused window to that screen edge |
