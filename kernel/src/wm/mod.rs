@@ -189,6 +189,10 @@ impl WindowManager {
         self.windows.iter().rev().find(|w| w.is_present()).map(|w| w.kind)
     }
 
+    pub fn drop_drag(&mut self) {
+        self.dragging = None;
+    }
+
     pub fn is_dragging(&self) -> bool {
         self.dragging.is_some()
     }

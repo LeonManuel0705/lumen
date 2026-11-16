@@ -169,6 +169,14 @@ impl Scene {
         self.date_len = n;
     }
 
+    fn begin_lock(&mut self) {
+        self.mode = ShellMode::Locked;
+        self.lock_entrance.restart();
+        self.windows.drop_drag();
+        self.date_dirty = true;
+        self.damage.mark_all();
+    }
+
     fn begin_unlock(&mut self) {
         self.mode = ShellMode::Unlocking;
         self.unlock.restart();
@@ -223,6 +231,7 @@ impl Scene {
             }
             match event.key {
                 Key::Escape => self.windows.close_focused(),
+                Key::Char('l') if event.mods.ctrl => self.begin_lock(),
                 Key::Char('w') if event.mods.ctrl && event.mods.shift => self.windows.close_all(),
                 Key::Char('w') if event.mods.ctrl => self.windows.close_focused(),
                 Key::Char('m') if event.mods.ctrl && event.mods.alt => self.windows.restore_all(),

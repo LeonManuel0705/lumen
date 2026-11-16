@@ -91,6 +91,7 @@ dock icon.
 
 | Keys | Effect |
 |:---|:---|
+| Ctrl-L | Lock the screen again |
 | Escape, Ctrl-W | Close the focused window |
 | Ctrl-Shift-W | Close every window |
 | Ctrl-M | Minimise the focused window |
