@@ -111,6 +111,7 @@ dock icon.
 | Space, Up | Make the ball jump |
 | Down | Slam the ball into the floor |
 | Left, Right | Push the ball sideways |
+| M | Fling the ball toward the cursor, harder the further away it is |
 | X | Stop the ball dead so it drops straight down |
 | C | Pull the ball back to the middle of the window |
 | F | Send the ball back the way it came |

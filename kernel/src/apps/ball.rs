@@ -15,6 +15,7 @@ const ARROW_PUSH: f32 = 180.0;
 const MAX_SIDE_SPEED: f32 = 900.0;
 const SLAM_SPEED: f32 = 1100.0;
 const SLOW_TEMPO: f32 = 0.3;
+const HOMING_GAIN: f32 = 3.0;
 
 pub struct BallApp {
     width: f32,
@@ -183,6 +184,13 @@ impl App for BallApp {
         if push != 0 {
             self.vx = (self.vx + push as f32 * ARROW_PUSH).clamp(-MAX_SIDE_SPEED, MAX_SIDE_SPEED);
             self.squash.nudge(-4.0);
+        }
+
+        if input.keys.pressed(Key::Char('m')) {
+            self.vx = ((input.cursor.0 - self.x) * HOMING_GAIN).clamp(-MAX_SIDE_SPEED, MAX_SIDE_SPEED);
+            self.vy = ((input.cursor.1 - self.y) * HOMING_GAIN).clamp(-MAX_SIDE_SPEED, MAX_SIDE_SPEED);
+            self.squash.nudge(-8.0);
+            self.pulse.nudge(-2.0);
         }
 
         if input.keys.pressed(Key::Char('x')) {
