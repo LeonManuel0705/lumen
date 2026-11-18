@@ -16,6 +16,8 @@ const MAX_SIDE_SPEED: f32 = 900.0;
 const SLAM_SPEED: f32 = 1100.0;
 const SLOW_TEMPO: f32 = 0.3;
 const HOMING_GAIN: f32 = 3.0;
+const QUAKE_SIDE: f32 = 420.0;
+const QUAKE_LIFT: f32 = 380.0;
 
 pub struct BallApp {
     width: f32,
@@ -191,6 +193,13 @@ impl App for BallApp {
             self.vy = ((input.cursor.1 - self.y) * HOMING_GAIN).clamp(-MAX_SIDE_SPEED, MAX_SIDE_SPEED);
             self.squash.nudge(-8.0);
             self.pulse.nudge(-2.0);
+        }
+
+        if input.keys.pressed(Key::Char('q')) {
+            self.vx = (self.vx + crate::rng::sign() * QUAKE_SIDE).clamp(-MAX_SIDE_SPEED, MAX_SIDE_SPEED);
+            self.vy -= QUAKE_LIFT;
+            self.squash.nudge(-12.0);
+            self.pulse.nudge(-3.0);
         }
 
         if input.keys.pressed(Key::Char('x')) {
