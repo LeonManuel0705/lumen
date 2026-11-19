@@ -18,6 +18,7 @@ const SLOW_TEMPO: f32 = 0.3;
 const HOMING_GAIN: f32 = 3.0;
 const QUAKE_SIDE: f32 = 420.0;
 const QUAKE_LIFT: f32 = 380.0;
+const UNDERWATER_DRAG: f32 = 2.6;
 
 pub struct BallApp {
     width: f32,
@@ -33,6 +34,7 @@ pub struct BallApp {
     slow: bool,
     superball: bool,
     wrap: bool,
+    underwater: bool,
     moon: bool,
     weightless: bool,
     paused: bool,
@@ -59,6 +61,7 @@ impl BallApp {
             slow: false,
             superball: false,
             wrap: false,
+            underwater: false,
             moon: false,
             weightless: false,
             paused: false,
@@ -104,6 +107,7 @@ impl BallApp {
         self.slow = false;
         self.superball = false;
         self.wrap = false;
+        self.underwater = false;
         self.tempo.set_target(1.0);
         self.paused = false;
         self.gravity.set_target(GRAVITY);
@@ -241,6 +245,12 @@ impl App for BallApp {
             self.pulse.nudge(3.0);
         }
 
+        if input.keys.pressed(Key::Char('u')) {
+            self.underwater = !self.underwater;
+            self.squash.nudge(6.0);
+            self.pulse.nudge(3.0);
+        }
+
         if input.keys.pressed(Key::Char('w')) {
             self.wrap = !self.wrap;
             self.pulse.nudge(3.0);
@@ -253,6 +263,11 @@ impl App for BallApp {
         }
         self.gravity.step(dt);
 
+        if self.underwater {
+            let keep = (1.0 - UNDERWATER_DRAG * dt).max(0.0);
+            self.vx *= keep;
+            self.vy *= keep;
+        }
         self.vy += self.gravity.current * dt;
         self.x += self.vx * dt;
         self.y += self.vy * dt;
