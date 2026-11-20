@@ -199,6 +199,13 @@ impl App for BallApp {
             self.pulse.nudge(-2.0);
         }
 
+        if input.keys.pressed(Key::Char('k')) {
+            self.vx = ((self.x - input.cursor.0) * HOMING_GAIN).clamp(-MAX_SIDE_SPEED, MAX_SIDE_SPEED);
+            self.vy = ((self.y - input.cursor.1) * HOMING_GAIN).clamp(-MAX_SIDE_SPEED, MAX_SIDE_SPEED);
+            self.squash.nudge(10.0);
+            self.pulse.nudge(-2.0);
+        }
+
         if input.keys.pressed(Key::Char('q')) {
             self.vx = (self.vx + crate::rng::sign() * QUAKE_SIDE).clamp(-MAX_SIDE_SPEED, MAX_SIDE_SPEED);
             self.vy -= QUAKE_LIFT;
