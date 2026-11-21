@@ -19,6 +19,8 @@ const HOMING_GAIN: f32 = 3.0;
 const QUAKE_SIDE: f32 = 420.0;
 const QUAKE_LIFT: f32 = 380.0;
 const UNDERWATER_DRAG: f32 = 2.6;
+const JELLY_SQUASH: f32 = 26.0;
+const JELLY_PULSE: f32 = -5.0;
 
 pub struct BallApp {
     width: f32,
@@ -204,6 +206,11 @@ impl App for BallApp {
             self.vy = ((self.y - input.cursor.1) * HOMING_GAIN).clamp(-MAX_SIDE_SPEED, MAX_SIDE_SPEED);
             self.squash.nudge(10.0);
             self.pulse.nudge(-2.0);
+        }
+
+        if input.keys.pressed(Key::Char('j')) {
+            self.squash.nudge(JELLY_SQUASH);
+            self.pulse.nudge(JELLY_PULSE);
         }
 
         if input.keys.pressed(Key::Char('q')) {

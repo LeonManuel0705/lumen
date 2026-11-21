@@ -112,6 +112,7 @@ dock icon.
 | Down | Slam the ball into the floor |
 | Left, Right | Push the ball sideways |
 | M | Fling the ball toward the cursor, harder the further away it is |
+| J | Wobble the ball like jelly without moving it |
 | K | Kick the ball away from the cursor, harder the further away it is |
 | Q | Shake the ball with a random sideways kick and a lift |
 | X | Stop the ball dead so it drops straight down |
