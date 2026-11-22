@@ -7,6 +7,7 @@ use super::{App, AppInput};
 pub struct ClockApp {
     clock: RollingClock,
     phase: f32,
+    caption_hidden: bool,
     width: i32,
     height: i32,
 }
@@ -16,6 +17,7 @@ impl ClockApp {
         Self {
             clock: RollingClock::new(&font_data::FONT_CLOCK, true),
             phase: 0.0,
+            caption_hidden: false,
             width: width as i32,
             height: height as i32,
         }
@@ -50,6 +52,9 @@ impl App for ClockApp {
         if input.keys.pressed(Key::Char('h')) {
             self.clock.toggle_twelve_hour();
         }
+        if input.keys.pressed(Key::Char('c')) {
+            self.caption_hidden = !self.caption_hidden;
+        }
         self.phase += dt;
         if self.phase >= 1.0 {
             self.phase -= 1.0;
@@ -62,6 +67,9 @@ impl App for ClockApp {
         let baseline = surface.height() as i32 / 2 + self.clock.digit_height() / 2 - 8;
         let pulse = 4.0 * self.phase * (1.0 - self.phase);
         self.clock.draw(surface, cx, baseline, 1.0, pulse);
+        if self.caption_hidden {
+            return;
+        }
         let caption = if self.clock.is_twelve_hour() { "Ortszeit, 12 Stunden" } else { "Ortszeit" };
         widgets::text_embossed(surface, &font_data::FONT_UI, caption, cx, baseline + 34, 150);
     }
