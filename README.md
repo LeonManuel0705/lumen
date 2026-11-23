@@ -101,6 +101,7 @@ dock icon.
 | Alt-Shift with an arrow | Move the focused window by 8 pixels |
 | Ctrl-Alt with an arrow | Send the focused window to that screen edge |
 | Alt-C | Center the focused window |
+| Alt-Shift-C | Stack every window in a cascade from the top left |
 | Alt-H | Send the focused window back to where it opened |
 | Alt-Shift-H | Send every window back to where it opened |
 | Tab, Shift-Tab | Walk the window stack forwards or backwards |

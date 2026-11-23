@@ -343,6 +343,14 @@ impl WindowManager {
         }
     }
 
+    pub fn cascade_all(&mut self) {
+        let screen = self.screen;
+        for (step, win) in self.windows.iter_mut().filter(|w| w.is_present()).enumerate() {
+            let step = step as f32;
+            win.relocate((SNAP_MARGIN + step * CASCADE_STEP.0, TOP_BAR_FLOOR + step * CASCADE_STEP.1), screen);
+        }
+    }
+
     pub fn nudge_focused(&mut self, dx: i32, dy: i32, fine: bool) {
         let step = if fine { KEY_MOVE_FINE_STEP } else { KEY_MOVE_STEP };
         self.relocate_focused(|win| (win.x + dx as f32 * step, win.y + dy as f32 * step));
