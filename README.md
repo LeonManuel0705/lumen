@@ -108,6 +108,7 @@ dock icon.
 | 1 to 6 | Launch, raise or bring back a dock app |
 | S in Uhr | Hide or show the seconds |
 | C in Uhr | Hide or show the caption under the clock |
+| P in Uhr | Stop or resume the beat that pulses once a second |
 | H in Uhr | Switch between the 24 and 12 hour clock |
 | Click in Ball | Throw the ball away from the cursor |
 | Space, Up | Make the ball jump |

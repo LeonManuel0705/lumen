@@ -8,6 +8,7 @@ pub struct ClockApp {
     clock: RollingClock,
     phase: f32,
     caption_hidden: bool,
+    beating: bool,
     width: i32,
     height: i32,
 }
@@ -18,6 +19,7 @@ impl ClockApp {
             clock: RollingClock::new(&font_data::FONT_CLOCK, true),
             phase: 0.0,
             caption_hidden: false,
+            beating: true,
             width: width as i32,
             height: height as i32,
         }
@@ -55,6 +57,9 @@ impl App for ClockApp {
         if input.keys.pressed(Key::Char('c')) {
             self.caption_hidden = !self.caption_hidden;
         }
+        if input.keys.pressed(Key::Char('p')) {
+            self.beating = !self.beating;
+        }
         self.phase += dt;
         if self.phase >= 1.0 {
             self.phase -= 1.0;
@@ -65,7 +70,7 @@ impl App for ClockApp {
     fn draw(&self, surface: &mut Surface) {
         let cx = surface.width() as i32 / 2;
         let baseline = surface.height() as i32 / 2 + self.clock.digit_height() / 2 - 8;
-        let pulse = 4.0 * self.phase * (1.0 - self.phase);
+        let pulse = if self.beating { 4.0 * self.phase * (1.0 - self.phase) } else { 0.0 };
         self.clock.draw(surface, cx, baseline, 1.0, pulse);
         if self.caption_hidden {
             return;
