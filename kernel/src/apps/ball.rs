@@ -208,6 +208,16 @@ impl App for BallApp {
             self.pulse.nudge(-2.0);
         }
 
+        if input.keys.pressed(Key::Char('v')) {
+            self.x = input.cursor.0.clamp(RADIUS, self.width - RADIUS);
+            self.y = input.cursor.1.clamp(RADIUS, self.height - RADIUS);
+            self.vx = 0.0;
+            self.vy = 0.0;
+            self.trail = [(self.x, self.y); TRAIL_LEN];
+            self.squash.nudge(-6.0);
+            self.pulse.nudge(2.0);
+        }
+
         if input.keys.pressed(Key::Char('j')) {
             self.squash.nudge(JELLY_SQUASH);
             self.pulse.nudge(JELLY_PULSE);
