@@ -116,6 +116,14 @@ impl BallApp {
         self.trail = [(self.x, self.y); TRAIL_LEN];
     }
 
+    fn fit(&mut self, width: usize, height: usize) {
+        self.width = width as f32;
+        self.height = height as f32;
+        self.x = self.x.clamp(RADIUS, (self.width - RADIUS).max(RADIUS));
+        self.y = self.y.clamp(RADIUS, (self.height - RADIUS).max(RADIUS));
+        self.trail = [(self.x, self.y); TRAIL_LEN];
+    }
+
     fn damping(&self, base: f32) -> f32 {
         if self.superball { SUPERBALL_DAMPING } else { base }
     }
@@ -137,6 +145,10 @@ impl App for BallApp {
 
     fn painted(&self) -> Option<Rect> {
         Some(self.ink())
+    }
+
+    fn resize(&mut self, width: usize, height: usize) {
+        self.fit(width, height);
     }
 
     fn update(&mut self, dt: f32, input: &AppInput<'_>) {

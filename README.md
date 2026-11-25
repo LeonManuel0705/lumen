@@ -6,7 +6,7 @@ the whole compositor runs on bare metal with no standard library underneath it.
 
 Lumen boots on `x86_64`, talks directly to the hardware, and draws its own interface into
 a linear framebuffer. There is no libc, no allocator from a crate registry doing the heavy
-lifting, and no graphics stack. Roughly 6,400 lines of `no_std` Rust sit between the
+lifting, and no graphics stack. Roughly 6,600 lines of `no_std` Rust sit between the
 bootloader handoff and the pixels.
 
 ## Why build this
@@ -41,9 +41,9 @@ latency all become kernel concerns.
 * A lock screen as the boot destination: large rolling clock, the date spelled out in
   German from the CMOS date registers, and an animated unlock into the desktop
 * A window compositor: windows own an RGBA surface on the heap, stack, raise on click,
-  drag by the title bar, and scale in and out of existence. The glass they are made of
-  reads its frosted backdrop from a blurred copy of the wallpaper rather than blurring
-  the screen again every frame
+  drag by the title bar, resize from a grip in the bottom right corner, and scale in and
+  out of existence. The glass they are made of reads its frosted backdrop from a blurred
+  copy of the wallpaper rather than blurring the screen again every frame
 * Damage tracking: a frame repaints only the regions that changed, with a clip rectangle
   carried through the drawing primitives so they narrow their loops to it instead of
   drawing pixels that will be thrown away, and a self-test that catches a region somebody
@@ -84,10 +84,10 @@ That builds the kernel for `x86_64-unknown-none`, assembles a bootable BIOS disk
 and launches QEMU at 1280x720 with the host clock passed through.
 
 The current build boots into a lock screen. Any key or a click unlocks it, and the desktop
-arrives with two windows. Drag them by the title bar, click one to bring it to the front,
-close one with the red dot or tuck it away with the amber one, and launch apps from the
-dock by clicking or with the number keys 1 to 6. A tucked away window comes back from its
-dock icon.
+arrives with two windows. Drag them by the title bar, pull the dotted grip in the bottom
+right corner to resize them, click one to bring it to the front, close one with the red dot
+or tuck it away with the amber one, and launch apps from the dock by clicking or with the
+number keys 1 to 6. A tucked away window comes back from its dock icon.
 
 | Keys | Effect |
 |:---|:---|
@@ -102,6 +102,8 @@ dock icon.
 | Ctrl-Alt with an arrow | Send the focused window to that screen edge |
 | Alt-C | Center the focused window |
 | Alt-Shift-C | Stack every window in a cascade from the top left |
+| Ctrl-Shift with an arrow | Resize the focused window by 40 pixels |
+| Alt-R | Give the focused window its opening size back |
 | Alt-H | Send the focused window back to where it opened |
 | Alt-Shift-H | Send every window back to where it opened |
 | Tab, Shift-Tab | Walk the window stack forwards or backwards |
@@ -189,9 +191,8 @@ whole scene into scratch space and compares, and reports the first disagreeing p
 the serial port. Set `VERIFY_EVERY` to 0 in `main.rs` to turn it off.
 
 Windows minimise, but for now they fade out like a closing window instead of pouring
-into the dock. There is still no window resizing, and window glass reads its frosted
-backdrop from the wallpaper rather than from whatever is actually behind the window,
-which is invisible until windows overlap.
+into the dock, and window glass reads its frosted backdrop from the wallpaper rather than
+from whatever is actually behind the window, which is invisible until windows overlap.
 
 ## License
 

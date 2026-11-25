@@ -22,6 +22,8 @@ const CASCADE_TRIES: usize = 6;
 const KEY_MOVE_STEP: f32 = 40.0;
 const KEY_MOVE_FINE_STEP: f32 = 8.0;
 const SNAP_MARGIN: f32 = 24.0;
+const GRIP_SIZE: f32 = 26.0;
+const KEY_RESIZE_STEP: i32 = 40;
 
 pub struct Window {
     id: u32,
@@ -117,6 +119,31 @@ impl Window {
         (cx + DOT_GAP, cy)
     }
 
+    fn on_grip(&self, px: f32, py: f32) -> bool {
+        let (x, y, w, h) = self.hit_rect();
+        self.contains(px, py) && px >= (x + w) as f32 - GRIP_SIZE && py >= (y + h) as f32 - GRIP_SIZE
+    }
+
+    fn resize_content(&mut self, content_w: i32, content_h: i32, screen: (f32, f32)) {
+        let (min_w, min_h) = self.kind.min_content_size();
+        let max_w = ((screen.0 - self.x) as i32 - CONTENT_INSET * 2).max(min_w as i32);
+        let max_h = ((screen.1 - self.y) as i32 - TITLE_BAR - CONTENT_INSET).max(min_h as i32);
+        let content_w = content_w.clamp(min_w as i32, max_w);
+        let content_h = content_h.clamp(min_h as i32, max_h);
+        if content_w as usize == self.surface.width() && content_h as usize == self.surface.height() {
+            return;
+        }
+        let before = self.painted();
+        self.width = content_w + CONTENT_INSET * 2;
+        self.height = content_h + TITLE_BAR + CONTENT_INSET;
+        self.surface.resize(content_w as usize, content_h as usize);
+        self.app.resize(content_w as usize, content_h as usize);
+        self.first_frame = true;
+        self.last_ink = Rect::EMPTY;
+        self.moved = true;
+        self.content_damage = self.content_damage.union(&before).union(&self.painted());
+    }
+
     fn near_dot(px: f32, py: f32, (cx, cy): (i32, i32)) -> bool {
         let dx = px - cx as f32;
         let dy = py - cy as f32;
@@ -161,6 +188,7 @@ impl Window {
 pub struct WindowManager {
     windows: Vec<Window>,
     dragging: Option<(u32, f32, f32)>,
+    resizing: Option<(u32, f32, f32)>,
     next_id: u32,
     screen: (f32, f32),
 }
@@ -170,6 +198,7 @@ impl WindowManager {
         Self {
             windows: Vec::new(),
             dragging: None,
+            resizing: None,
             next_id: 1,
             screen: (width, height),
         }
@@ -191,10 +220,11 @@ impl WindowManager {
 
     pub fn drop_drag(&mut self) {
         self.dragging = None;
+        self.resizing = None;
     }
 
     pub fn is_dragging(&self) -> bool {
-        self.dragging.is_some()
+        self.dragging.is_some() || self.resizing.is_some()
     }
 
     pub fn open(&mut self, kind: AppKind, x: f32, y: f32, delay: f32) {
@@ -286,6 +316,12 @@ impl WindowManager {
             crate::serial_println!("[wm] window {} closing", win.id);
         } else if win.on_minimize(px, py) {
             win.begin_minimize();
+        } else if win.on_grip(px, py) {
+            self.resizing = Some((
+                win.id,
+                win.x + win.width as f32 - px,
+                win.y + win.height as f32 - py,
+            ));
         } else if win.on_title_bar(px, py) {
             self.dragging = Some((win.id, px - win.x, py - win.y));
         }
@@ -312,12 +348,16 @@ impl WindowManager {
             if self.dragging.is_some_and(|(id, _, _)| id == win.id) {
                 self.dragging = None;
             }
+            if self.resizing.is_some_and(|(id, _, _)| id == win.id) {
+                self.resizing = None;
+            }
             win.begin_minimize();
         }
     }
 
     pub fn minimize_all(&mut self) {
         self.dragging = None;
+        self.resizing = None;
         for win in self.windows.iter_mut().filter(|w| w.is_present()) {
             win.begin_minimize();
         }
@@ -373,6 +413,23 @@ impl WindowManager {
         });
     }
 
+    pub fn resize_focused(&mut self, dw: i32, dh: i32) {
+        let screen = self.screen;
+        if let Some(win) = self.windows.iter_mut().rev().find(|w| w.is_present()) {
+            let content_w = win.surface.width() as i32 + dw * KEY_RESIZE_STEP;
+            let content_h = win.surface.height() as i32 + dh * KEY_RESIZE_STEP;
+            win.resize_content(content_w, content_h, screen);
+        }
+    }
+
+    pub fn reset_size_focused(&mut self) {
+        let screen = self.screen;
+        if let Some(win) = self.windows.iter_mut().rev().find(|w| w.is_present()) {
+            let (content_w, content_h) = win.kind.content_size();
+            win.resize_content(content_w as i32, content_h as i32, screen);
+        }
+    }
+
     pub fn home_focused(&mut self) {
         self.relocate_focused(|win| win.home);
     }
@@ -418,6 +475,16 @@ impl WindowManager {
         }
         if !held {
             self.dragging = None;
+            self.resizing = None;
+        }
+
+        if let Some((id, grab_x, grab_y)) = self.resizing {
+            let screen = self.screen;
+            if let Some(win) = self.windows.iter_mut().find(|w| w.id == id && w.is_present()) {
+                let content_w = (cursor.0 + grab_x - win.x) as i32 - CONTENT_INSET * 2;
+                let content_h = (cursor.1 + grab_y - win.y) as i32 - TITLE_BAR - CONTENT_INSET;
+                win.resize_content(content_w, content_h, screen);
+            }
         }
 
         if let Some((id, grab_x, grab_y)) = self.dragging {
@@ -472,7 +539,7 @@ impl WindowManager {
                 && local.1 < win.surface.height() as f32;
             let input = AppInput {
                 cursor: local,
-                clicked: just_pressed && inside && focused,
+                clicked: just_pressed && inside && focused && !win.on_grip(cursor.0, cursor.1),
                 keys: if focused { keys } else { &KeyBatch::EMPTY },
             };
             win.app.update(dt, &input);
@@ -605,6 +672,16 @@ impl WindowManager {
         let content_cy = y as f32 + bar_h as f32 + (win.surface.height() as f32 * scale) * 0.5;
         win.surface
             .blit_scaled(frame, content_cx, content_cy, scale, opacity);
+
+        let grip_color = Color::WHITE.with_alpha(fade(if focused { 170 } else { 100 }));
+        let grip_dot = ((2.0 * scale) as i32).max(1);
+        let (grip_x, grip_y) = (x + w - (13.0 * scale) as i32, y + h - (13.0 * scale) as i32);
+        let grip_gap = (6.0 * scale) as i32;
+        for row in 0..3 {
+            for col in 0..=row {
+                shapes::fill_circle(frame, grip_x - col * grip_gap, grip_y - (row - col) * grip_gap, grip_dot, grip_color);
+            }
+        }
 
         if focused {
             shapes::stroke_rounded_rect(

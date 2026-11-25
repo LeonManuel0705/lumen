@@ -22,6 +22,14 @@ impl Surface {
         }
     }
 
+    pub fn resize(&mut self, width: usize, height: usize) {
+        self.width = width;
+        self.height = height;
+        self.pixels.clear();
+        self.pixels.resize(width * height, Color::TRANSPARENT);
+        self.clip = self.full_rect();
+    }
+
     pub fn full_rect(&self) -> Rect {
         Rect::new(0, 0, self.width as i32, self.height as i32)
     }

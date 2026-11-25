@@ -43,6 +43,11 @@ impl App for ClockApp {
         ))
     }
 
+    fn resize(&mut self, width: usize, height: usize) {
+        self.width = width as i32;
+        self.height = height as i32;
+    }
+
     fn set_clock(&mut self, day_seconds: u32) {
         self.clock.set(day_seconds);
     }

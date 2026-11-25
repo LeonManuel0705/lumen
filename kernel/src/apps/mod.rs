@@ -25,6 +25,7 @@ pub trait App {
     fn painted(&self) -> Option<Rect>;
 
     fn set_clock(&mut self, _day_seconds: u32) {}
+    fn resize(&mut self, _width: usize, _height: usize) {}
     fn draw(&self, surface: &mut Surface);
 }
 
@@ -33,6 +34,13 @@ impl AppKind {
         match self {
             AppKind::Ball => (460, 300),
             AppKind::Clock => (300, 130),
+        }
+    }
+
+    pub fn min_content_size(self) -> (usize, usize) {
+        match self {
+            AppKind::Ball => (280, 200),
+            AppKind::Clock => (240, 110),
         }
     }
 
