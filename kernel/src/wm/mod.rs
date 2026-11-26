@@ -144,6 +144,11 @@ impl Window {
         self.content_damage = self.content_damage.union(&before).union(&self.painted());
     }
 
+    fn reset_size(&mut self, screen: (f32, f32)) {
+        let (content_w, content_h) = self.kind.content_size();
+        self.resize_content(content_w as i32, content_h as i32, screen);
+    }
+
     fn near_dot(px: f32, py: f32, (cx, cy): (i32, i32)) -> bool {
         let dx = px - cx as f32;
         let dy = py - cy as f32;
@@ -425,8 +430,14 @@ impl WindowManager {
     pub fn reset_size_focused(&mut self) {
         let screen = self.screen;
         if let Some(win) = self.windows.iter_mut().rev().find(|w| w.is_present()) {
-            let (content_w, content_h) = win.kind.content_size();
-            win.resize_content(content_w as i32, content_h as i32, screen);
+            win.reset_size(screen);
+        }
+    }
+
+    pub fn reset_size_all(&mut self) {
+        let screen = self.screen;
+        for win in self.windows.iter_mut().filter(|w| w.is_present()) {
+            win.reset_size(screen);
         }
     }
 

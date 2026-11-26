@@ -104,6 +104,7 @@ number keys 1 to 6. A tucked away window comes back from its dock icon.
 | Alt-Shift-C | Stack every window in a cascade from the top left |
 | Ctrl-Shift with an arrow | Resize the focused window by 40 pixels |
 | Alt-R | Give the focused window its opening size back |
+| Alt-Shift-R | Give every window its opening size back |
 | Alt-H | Send the focused window back to where it opened |
 | Alt-Shift-H | Send every window back to where it opened |
 | Tab, Shift-Tab | Walk the window stack forwards or backwards |
