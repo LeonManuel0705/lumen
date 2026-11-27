@@ -134,7 +134,7 @@ number keys 1 to 6. A tucked away window comes back from its dock icon.
 | U | Thicken the air so the ball moves as if underwater, and back |
 | P | Freeze the ball in mid-air and let it go again |
 | T | Hide the trail and bring it back |
-| R | Reset the ball and bring it back to earth gravity |
+| R | Reset the ball, restore its trail and bring it back to earth gravity |
 
 | Variable | Effect |
 |:---|:---|

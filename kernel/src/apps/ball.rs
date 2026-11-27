@@ -110,6 +110,7 @@ impl BallApp {
         self.superball = false;
         self.wrap = false;
         self.underwater = false;
+        self.trail_hidden = false;
         self.tempo.set_target(1.0);
         self.paused = false;
         self.gravity.set_target(GRAVITY);
