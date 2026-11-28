@@ -117,6 +117,7 @@ number keys 1 to 6. A tucked away window comes back from its dock icon.
 | Space, Up | Make the ball jump |
 | Down | Slam the ball into the floor |
 | Left, Right | Push the ball sideways |
+| L | Lob the ball high into the air so it comes down near the cursor |
 | M | Fling the ball toward the cursor, harder the further away it is |
 | V | Set the ball down at the cursor and let it fall from there |
 | J | Wobble the ball like jelly without moving it |

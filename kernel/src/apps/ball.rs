@@ -19,6 +19,8 @@ const HOMING_GAIN: f32 = 3.0;
 const QUAKE_SIDE: f32 = 420.0;
 const QUAKE_LIFT: f32 = 380.0;
 const UNDERWATER_DRAG: f32 = 2.6;
+const LOB_LIFT: f32 = 820.0;
+const LOB_GAIN: f32 = 1.2;
 const JELLY_SQUASH: f32 = 26.0;
 const JELLY_PULSE: f32 = -5.0;
 
@@ -218,6 +220,13 @@ impl App for BallApp {
             self.vx = ((self.x - input.cursor.0) * HOMING_GAIN).clamp(-MAX_SIDE_SPEED, MAX_SIDE_SPEED);
             self.vy = ((self.y - input.cursor.1) * HOMING_GAIN).clamp(-MAX_SIDE_SPEED, MAX_SIDE_SPEED);
             self.squash.nudge(10.0);
+            self.pulse.nudge(-2.0);
+        }
+
+        if input.keys.pressed(Key::Char('l')) {
+            self.vx = ((input.cursor.0 - self.x) * LOB_GAIN).clamp(-MAX_SIDE_SPEED, MAX_SIDE_SPEED);
+            self.vy = -LOB_LIFT;
+            self.squash.nudge(-10.0);
             self.pulse.nudge(-2.0);
         }
 
